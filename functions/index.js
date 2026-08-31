@@ -356,6 +356,139 @@ exports.generateAiInsight = onCall({timeoutSeconds: 120}, async (request) => {
   }
 });
 
+// --- AI PREMIUM PROATTIVA (Blocco 3 del piano): DISTRIBUZIONE ENTRATE ---
+//
+// Punti 2+6 del piano: suggerisce come distribuire una nuova entrata tra le
+// buste esistenti. A differenza di generateAiInsight, qui serve un output
+// STRUTTURATO (importo per busta) perché il client lo usa per precompilare
+// il form di una nuova entrata — mai per applicarlo automaticamente, quello
+// resta sempre un'azione esplicita dell'utente (bottone "Applica
+// distribuzione" + comunque il salvataggio finale della entrata).
+
+exports.suggestIncomeDistribution = onCall(
+    {timeoutSeconds: 120},
+    async (request) => {
+      try {
+        if (!request.auth) {
+          throw new HttpsError("unauthenticated", "Devi essere autenticato.");
+        }
+        const userId = request.auth.uid;
+        const userRef = db.collection("users").doc(userId);
+        const userDoc = await userRef.get();
+        const userData = userDoc.data() || {};
+
+        // 1. Accesso Premium/Trial e quota condivisa (stessa di
+        // generateAiInsight), prima di validare qualunque altro parametro.
+        const {isPremium} = requireActiveAccess(userData);
+        requireAnalisiQuotaAvailable(userData, isPremium);
+
+        // 2. Validazione input.
+        const incomeAmount = Number(request.data.incomeAmount);
+        const envelopes = Array.isArray(request.data.envelopes) ?
+          request.data.envelopes.filter(
+              (e) => e && typeof e.id === "string" && typeof e.name ===
+              "string",
+          ) :
+          [];
+        const summary = typeof request.data.summary === "string" ?
+          request.data.summary : "";
+
+        if (!Number.isFinite(incomeAmount) || incomeAmount <= 0) {
+          throw new HttpsError(
+              "invalid-argument",
+              "incomeAmount deve essere un numero positivo.",
+          );
+        }
+        if (envelopes.length === 0) {
+          throw new HttpsError(
+              "invalid-argument",
+              "Serve almeno una busta per proporre una distribuzione.",
+          );
+        }
+
+        const envelopeIds = envelopes.map((e) => e.id);
+
+        const model = genAI.getGenerativeModel({
+          model: "gemini-3.5-flash-lite",
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "object",
+              properties: {
+                allocazioni: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      envelopeId: {type: "string", enum: envelopeIds},
+                      importo: {type: "number"},
+                    },
+                    required: ["envelopeId", "importo"],
+                  },
+                },
+                motivazione: {type: "string"},
+              },
+              required: ["allocazioni", "motivazione"],
+            },
+          },
+        });
+
+        const prompt = "Sei un consulente di budget familiare. L'utente " +
+          `ha ricevuto un'entrata di €${incomeAmount.toFixed(2)} e vuole ` +
+          "un consiglio su come distribuirla tra le sue buste, basandoti " +
+          "SOLO sui dati reali forniti qui sotto (non inventare mai " +
+          `numeri).\n${summary}\n` +
+          "Proponi una distribuzione: la somma di tutti gli \"importo\" " +
+          "deve avvicinarsi il più possibile a " +
+          `€${incomeAmount.toFixed(2)} senza mai superarlo (va bene ` +
+          "lasciare una parte non assegnata se ha senso). Non è " +
+          "necessario dare qualcosa a ogni busta. Dai priorità alle buste " +
+          "più vicine a esaurirsi e agli eventuali obiettivi di risparmio " +
+          "con quota mensile indicata. Aggiungi \"motivazione\": una " +
+          "sola frase breve in italiano che spieghi la logica principale " +
+          "della proposta.";
+
+        const result = await model.generateContent(prompt);
+        const parsed = JSON.parse(result.response.text());
+
+        // 3. Normalizza lato server: il client userà questi numeri per
+        // precompilare il form, quindi devono quadrare sempre (mai oltre
+        // il totale dichiarato, mai importi negativi) anche se il modello
+        // arrotonda o sbaglia leggermente la somma.
+        const rawAllocazioni = Array.isArray(parsed.allocazioni) ?
+          parsed.allocazioni : [];
+        const cleaned = rawAllocazioni
+            .filter(
+                (a) => a && envelopeIds.includes(a.envelopeId) &&
+                Number.isFinite(a.importo) && a.importo > 0,
+            )
+            .map((a) => ({envelopeId: a.envelopeId, importo: a.importo}));
+        const sum = cleaned.reduce((s, a) => s + a.importo, 0);
+        const scale = sum > incomeAmount && sum > 0 ? incomeAmount / sum : 1;
+        const allocazioni = cleaned.map((a) => ({
+          envelopeId: a.envelopeId,
+          importo: Math.round(a.importo * scale * 100) / 100,
+        }));
+
+        // 4. Aggiorna il contatore condiviso SOLO dopo una risposta
+        // riuscita.
+        await incrementAnalisiQuota(userRef);
+
+        return {
+          allocazioni,
+          motivazione: typeof parsed.motivazione === "string" ?
+            parsed.motivazione : "",
+        };
+      } catch (error) {
+        console.error("ERRORE SUGGEST INCOME DISTRIBUTION:", error);
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+        throw new HttpsError("internal", error.message);
+      }
+    },
+);
+
 // --- FASE 4: FUNZIONI PER GESTIONE INVITI FAMIGLIA ---
 
 exports.inviteFamilyMember = onCall(async (request) => {

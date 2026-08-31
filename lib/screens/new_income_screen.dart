@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../models/app_user.dart';
+import '../models/challenge.dart';
 import '../models/envelope.dart';
+import '../services/ai_service.dart';
 import '../services/firestore_service.dart';
 
 class NewIncomeScreen extends StatefulWidget {
@@ -13,8 +16,13 @@ class NewIncomeScreen extends StatefulWidget {
 
 class _NewIncomeScreenState extends State<NewIncomeScreen> {
   final _service = FirestoreService();
+  final _aiService = AiService();
   final _totalController = TextEditingController();
   final _descriptionController = TextEditingController();
+
+  bool _aiLoading = false;
+  IncomeDistributionSuggestion? _aiSuggestion;
+  String? _aiError;
 
   // Categoria selezionata per l'entrata
   String _selectedCategory = 'Stipendio';
@@ -113,6 +121,11 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                       ],
                     ),
                   ),
+                  if (_totalIncome > 0 && envelopes.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: _aiSuggestionSection(envelopes, setLocalState),
+                    ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Row(
@@ -227,6 +240,251 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
             },
           );
         },
+      ),
+    );
+  }
+
+  /// Sezione "Consiglio AI per la distribuzione" (punti 2+6 del piano AI
+  /// Premium). Visibile solo a Premium/Trial. Non applica mai nulla da
+  /// sola: mostra un bottone "Applica distribuzione" che precompila i
+  /// campi di allocazione già esistenti, lasciando comunque all'utente il
+  /// salvataggio finale con "Registra e distribuisci entrata".
+  Widget _aiSuggestionSection(
+    List<Envelope> envelopes,
+    StateSetter setLocalState,
+  ) {
+    return StreamBuilder<AppUser>(
+      stream: _service.streamUser(),
+      builder: (context, snapshot) {
+        final hasAi = snapshot.data?.hasAiAccess ?? false;
+        if (!hasAi) return const SizedBox.shrink();
+
+        final suggestion = _aiSuggestion;
+        if (suggestion != null) {
+          final shownEnvelopes = envelopes
+              .where((e) => (suggestion.allocations[e.id] ?? 0) > 0)
+              .toList();
+          return Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const CircleAvatar(
+                      radius: 14,
+                      backgroundColor: AppColors.primary,
+                      child: Icon(
+                        Icons.smart_toy,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Ti consiglio questa distribuzione',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.close,
+                        size: 18,
+                        color: AppColors.neutral,
+                      ),
+                      onPressed: () =>
+                          setLocalState(() => _aiSuggestion = null),
+                    ),
+                  ],
+                ),
+                if (suggestion.motivazione.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    suggestion.motivazione,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.neutral,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                ...shownEnvelopes.map(
+                  (e) => Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      '${e.icon} ${e.name}: €'
+                      '${suggestion.allocations[e.id]!.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onPressed: () => _applySuggestion(setLocalState),
+                    child: const Text(
+                      'Applica distribuzione',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _aiLoading
+                      ? null
+                      : () => _requestAiSuggestion(envelopes, setLocalState),
+                  icon: _aiLoading
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.primary,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.smart_toy_outlined,
+                          size: 18,
+                          color: AppColors.primary,
+                        ),
+                  label: Text(
+                    _aiLoading
+                        ? 'Sto pensando...'
+                        : 'Consiglio AI per la distribuzione',
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    side: const BorderSide(color: AppColors.primary),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              if (_aiError != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    _aiError!,
+                    style: const TextStyle(
+                      color: AppColors.danger,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<String> _buildAllocationSummary(List<Envelope> envelopes) async {
+    final envelopeLines = envelopes
+        .map((e) {
+          final pct = (e.percentUsed * 100).round();
+          return '${e.name} (budget €${e.budget.toStringAsFixed(0)}, saldo '
+              'attuale €${e.balance.toStringAsFixed(0)}, usata al $pct%)';
+        })
+        .join(', ');
+
+    final buffer = StringBuffer('Buste attuali: $envelopeLines.');
+
+    final challenges = await _service.streamChallenges().first;
+    final goals = challenges.where(
+      (c) =>
+          c.type == ChallengeType.saving &&
+          c.percentComplete < 1 &&
+          c.monthlyQuota != null,
+    );
+    if (goals.isNotEmpty) {
+      final goalLines = goals
+          .map(
+            (g) => '"${g.title}" quota mensile consigliata '
+                '€${g.monthlyQuota!.toStringAsFixed(2)}',
+          )
+          .join(', ');
+      buffer.write(' Obiettivi di risparmio attivi: $goalLines.');
+    }
+    return buffer.toString();
+  }
+
+  Future<void> _requestAiSuggestion(
+    List<Envelope> envelopes,
+    StateSetter setLocalState,
+  ) async {
+    setLocalState(() {
+      _aiLoading = true;
+      _aiError = null;
+    });
+    try {
+      final summary = await _buildAllocationSummary(envelopes);
+      final suggestion = await _aiService.suggestIncomeDistribution(
+        incomeAmount: _totalIncome,
+        envelopes: envelopes.map((e) => (id: e.id, name: e.name)).toList(),
+        summary: summary,
+      );
+      if (!mounted) return;
+      setLocalState(() {
+        _aiSuggestion = suggestion;
+        _aiLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setLocalState(() {
+        _aiError = e.toString().replaceFirst('Exception: ', '');
+        _aiLoading = false;
+      });
+    }
+  }
+
+  void _applySuggestion(StateSetter setLocalState) {
+    final suggestion = _aiSuggestion;
+    if (suggestion == null) return;
+    setLocalState(() {
+      suggestion.allocations.forEach((envelopeId, amount) {
+        _allocationControllers[envelopeId]?.text = amount.toStringAsFixed(2);
+      });
+      _aiSuggestion = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Distribuzione applicata: controlla e correggi se serve prima '
+          'di salvare.',
+        ),
       ),
     );
   }

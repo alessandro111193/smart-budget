@@ -67,4 +67,64 @@ class AiService {
       );
     }
   }
+
+  /// Chiede all'AI una proposta di distribuzione di una nuova entrata tra
+  /// le buste esistenti. Restituisce solo un suggerimento: il chiamante
+  /// deve sempre mostrarlo con un'azione esplicita di conferma prima di
+  /// applicarlo, mai applicarlo da solo.
+  Future<IncomeDistributionSuggestion> suggestIncomeDistribution({
+    required double incomeAmount,
+    required List<({String id, String name})> envelopes,
+    required String summary,
+  }) async {
+    final callable = _functions.httpsCallable('suggestIncomeDistribution');
+    try {
+      final result = await callable.call({
+        'incomeAmount': incomeAmount,
+        'envelopes': envelopes
+            .map((e) => {'id': e.id, 'name': e.name})
+            .toList(),
+        'summary': summary,
+      });
+      final data = Map<String, dynamic>.from(result.data as Map);
+      final allocazioni = List<Map<String, dynamic>>.from(
+        data['allocazioni'] ?? [],
+      );
+      return IncomeDistributionSuggestion(
+        motivazione: data['motivazione'] as String? ?? '',
+        allocations: {
+          for (final a in allocazioni)
+            a['envelopeId'] as String: (a['importo'] as num).toDouble(),
+        },
+      );
+    } on FirebaseFunctionsException catch (e) {
+      if (e.code == 'resource-exhausted') {
+        throw Exception(
+          'Hai raggiunto il limite di analisi AI del trial.',
+        );
+      }
+      if (e.code == 'permission-denied') {
+        throw Exception('Questa funzione richiede Premium.');
+      }
+      throw Exception(
+        'Errore nel calcolo della distribuzione consigliata: ${e.message}',
+      );
+    } catch (e) {
+      throw Exception(
+        'Errore imprevisto durante il calcolo della distribuzione.',
+      );
+    }
+  }
+}
+
+/// Risultato di [AiService.suggestIncomeDistribution]: quanto assegnare a
+/// ciascuna busta (per envelopeId) e la motivazione in una frase.
+class IncomeDistributionSuggestion {
+  final String motivazione;
+  final Map<String, double> allocations;
+
+  IncomeDistributionSuggestion({
+    required this.motivazione,
+    required this.allocations,
+  });
 }
