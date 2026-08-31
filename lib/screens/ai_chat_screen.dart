@@ -127,6 +127,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
       ),
       body: Column(
         children: [
+          const _MonthlyReportCard(),
           Expanded(
             child: _messages.isEmpty
                 ? const Center(
@@ -232,6 +233,167 @@ class _AiChatScreenState extends State<AiChatScreen> {
         ),
         const SizedBox(width: 8),
         Flexible(child: bubble),
+      ],
+    );
+  }
+}
+
+/// "Il mio mese secondo l'AI" (punto 12 del piano): entrate/spese/risparmio
+/// (numeri veri, mai inventati) + punto di forza/attenzione/consiglio
+/// narrati dalla Cloud Function generateAiInsight, generati al massimo una
+/// volta al mese e serviti dalla cache per il resto delle aperture. Questa
+/// schermata è raggiungibile solo da utenti con accesso AI, quindi non
+/// serve un controllo hasAi qui dentro.
+class _MonthlyReportCard extends StatefulWidget {
+  const _MonthlyReportCard();
+
+  @override
+  State<_MonthlyReportCard> createState() => _MonthlyReportCardState();
+}
+
+class _MonthlyReportCardState extends State<_MonthlyReportCard> {
+  final _service = FirestoreService();
+  final _aiService = AiService();
+  bool _generating = false;
+  bool _expanded = false;
+  String? _error;
+
+  String get _monthKey {
+    final now = DateTime.now();
+    final month = now.month.toString().padLeft(2, '0');
+    return '${now.year}-$month';
+  }
+
+  void _ensureFresh(AiMonthlyReport? cached) {
+    if (_generating || (cached != null && cached.monthKey == _monthKey)) {
+      return;
+    }
+    _generating = true;
+    _aiService.generateInsight(kind: 'monthly_report').then((_) {
+      if (mounted) setState(() => _generating = false);
+    }).catchError((Object e) {
+      if (mounted) {
+        setState(() {
+          _generating = false;
+          _error = e.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<AiMonthlyReport?>(
+      stream: _service.streamAiMonthlyReport(),
+      builder: (context, snapshot) {
+        final cached = snapshot.data;
+        final isFresh = cached != null && cached.monthKey == _monthKey;
+        if (!isFresh) {
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _ensureFresh(cached),
+          );
+        }
+
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              InkWell(
+                onTap: isFresh
+                    ? () => setState(() => _expanded = !_expanded)
+                    : null,
+                child: Row(
+                  children: [
+                    const CircleAvatar(
+                      radius: 14,
+                      backgroundColor: AppColors.primary,
+                      child: Icon(
+                        Icons.insights,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Il mio mese secondo l\'AI',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    if (isFresh)
+                      Icon(
+                        _expanded ? Icons.expand_less : Icons.expand_more,
+                        color: AppColors.neutral,
+                      ),
+                  ],
+                ),
+              ),
+              if (!isFresh) ...[
+                const SizedBox(height: 6),
+                Text(
+                  _error ?? 'Sto preparando il report del mese...',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.neutral,
+                  ),
+                ),
+              ],
+              if (isFresh) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Entrate €${cached.totalEntrate.toStringAsFixed(0)}   |   '
+                  'Spese €${cached.totalSpeso.toStringAsFixed(0)}   |   '
+                  'Risparmio €${cached.risparmio.toStringAsFixed(0)}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (_expanded) ...[
+                  const SizedBox(height: 8),
+                  _reportLine(
+                    Icons.trending_up,
+                    AppColors.primary,
+                    cached.puntoDiForza,
+                  ),
+                  const SizedBox(height: 4),
+                  _reportLine(
+                    Icons.warning_amber_rounded,
+                    AppColors.warning,
+                    cached.attenzione,
+                  ),
+                  const SizedBox(height: 4),
+                  _reportLine(
+                    Icons.lightbulb_outline,
+                    AppColors.secondary,
+                    cached.consiglio,
+                  ),
+                ],
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _reportLine(IconData icon, Color color, String text) {
+    if (text.isEmpty) return const SizedBox.shrink();
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 6),
+        Expanded(child: Text(text, style: const TextStyle(fontSize: 12))),
       ],
     );
   }

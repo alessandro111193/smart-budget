@@ -296,20 +296,105 @@ exports.scanReceipt = onCall({timeoutSeconds: 120}, async (request) => {
   }
 });
 
-// --- AI PREMIUM PROATTIVA (Blocco 2 del piano): FUNZIONE CONDIVISA ---
+// --- AI PREMIUM PROATTIVA: FUNZIONE CONDIVISA PER GLI INSIGHT NARRATIVI ---
 //
-// Un'unica Cloud Function per tutti gli insight narrativi generati da
+// Un'unica Cloud Function per tutti gli insight testuali generati da
 // Gemini (mai per calcoli/somme, solo per la frase finale), selezionati
-// con "kind". In questo blocco è cablato solo un kind di prova
-// ("test_echo") per validare l'infrastruttura end-to-end: gating
-// Premium/Trial, quota condivisa analisiAvanzateUsate, chiamata Gemini,
-// incremento del contatore solo dopo una risposta riuscita. I kind reali
-// verranno aggiunti uno per blocco successivo:
+// con "kind". Kind cablati finora:
 //   - "daily_tip" / "monthly_report" (Blocco 4): la function aggrega i
-//     dati lato server (Admin SDK) e scrive il risultato in cache su
-//     users/{uid} (aiDailyTip / aiMonthlyReport).
-//   - "habit_analysis" (Blocco 5), "family_analysis" (Blocco 8): ricevono
+//     dati lato server (Admin SDK), scrive il risultato in cache su
+//     users/{uid} (aiDailyTip / aiMonthlyReport) e, se la cache per il
+//     giorno/mese corrente è già valida, la restituisce senza richiamare
+//     Gemini né consumare quota — rigenerazione al massimo una volta al
+//     giorno/mese, come da piano.
+//   - "habit_analysis" (Blocco 5), "family_analysis" (Blocco 8): riceveranno
 //     un summary già compatto costruito lato client, come chatWithAssistant.
+
+/**
+ * Aggrega, solo con letture Firestore (Admin SDK, nessuna chiamata AI), un
+ * riepilogo compatto delle finanze PERSONALI del mese corrente dell'utente:
+ * spese per categoria, entrate/spese totali, quota mensile degli obiettivi
+ * di risparmio attivi. Stessa struttura/regole del riepilogo già costruito
+ * lato client in ai_chat_screen.dart — mai dati familiari, mai transazioni
+ * singole.
+ * @param {string} userId L'uid dell'utente (sempre quello della richiesta,
+ *   mai di un altro utente).
+ * @return {Promise<{summary: string, totalEntrate: number,
+ *   totalSpeso: number}>} riepilogo testuale e totali del mese.
+ */
+async function buildPersonalMonthlySummary(userId) {
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const startIso = startOfMonth.toISOString();
+  const endIso = startOfNextMonth.toISOString();
+
+  const userExpenses = db.collection("users").doc(userId).collection(
+      "expenses",
+  );
+  const userIncomes = db.collection("users").doc(userId).collection(
+      "incomes",
+  );
+  const userChallenges = db.collection("users").doc(userId).collection(
+      "challenges",
+  );
+
+  const [expensesSnap, incomesSnap, challengesSnap] = await Promise.all([
+    userExpenses.where("date", ">=", startIso).where("date", "<", endIso)
+        .get(),
+    userIncomes.where("date", ">=", startIso).where("date", "<", endIso)
+        .get(),
+    userChallenges.get(),
+  ]);
+
+  const byCategory = {};
+  let totalSpeso = 0;
+  expensesSnap.forEach((doc) => {
+    const d = doc.data();
+    const amount = Number(d.amount) || 0;
+    const category = d.category || "Altro";
+    byCategory[category] = (byCategory[category] || 0) + amount;
+    totalSpeso += amount;
+  });
+
+  let totalEntrate = 0;
+  incomesSnap.forEach((doc) => {
+    totalEntrate += Number(doc.data().amount) || 0;
+  });
+
+  const goalLines = [];
+  challengesSnap.forEach((doc) => {
+    const c = doc.data();
+    if (c.type !== "saving" || !c.deadline) return;
+    const target = Number(c.targetAmount) || 0;
+    const saved = Number(c.savedAmount) || 0;
+    if (target <= 0 || saved >= target) return;
+    const deadline = c.deadline.toDate ?
+      c.deadline.toDate() : new Date(c.deadline);
+    const monthsLeft = (deadline.getFullYear() - now.getFullYear()) * 12 +
+      (deadline.getMonth() - now.getMonth());
+    if (monthsLeft <= 0) return;
+    const quota = (target - saved) / monthsLeft;
+    goalLines.push(
+        `"${c.title}" quota mensile consigliata €${quota.toFixed(2)}`,
+    );
+  });
+
+  const categorie = Object.entries(byCategory)
+      .map(([nome, importo]) => `${nome}: €${importo.toFixed(0)}`)
+      .join(", ");
+
+  let summary = categorie ?
+    `Spese per categoria questo mese: ${categorie}.\n` :
+    "Nessuna spesa registrata questo mese.\n";
+  summary += `Entrate: €${totalEntrate.toFixed(2)}   |   ` +
+    `Spese: €${totalSpeso.toFixed(2)}\n`;
+  if (goalLines.length > 0) {
+    summary += `Obiettivi di risparmio attivi: ${goalLines.join(", ")}.\n`;
+  }
+
+  return {summary, totalEntrate, totalSpeso};
+}
 
 exports.generateAiInsight = onCall({timeoutSeconds: 120}, async (request) => {
   try {
@@ -320,33 +405,114 @@ exports.generateAiInsight = onCall({timeoutSeconds: 120}, async (request) => {
     const userRef = db.collection("users").doc(userId);
     const userDoc = await userRef.get();
     const userData = userDoc.data() || {};
+    const now = new Date();
 
-    // 1. Accesso Premium/Trial e quota condivisa, prima di spendere nulla.
+    // Accesso Premium/Trial richiesto sempre, anche per servire dalla
+    // cache: resta comunque una funzionalità Premium.
     const {isPremium} = requireActiveAccess(userData);
-    requireAnalisiQuotaAvailable(userData, isPremium);
 
-    // 2. Solo il kind di prova è supportato in questo blocco.
     const kind = request.data.kind;
-    if (kind !== "test_echo") {
-      throw new HttpsError(
-          "invalid-argument",
-          `Tipo di insight non supportato in questo blocco: "${kind}".`,
-      );
+
+    if (kind === "daily_tip") {
+      const todayKey = now.toISOString().slice(0, 10); // yyyy-MM-dd
+      const cached = userData.aiDailyTip;
+      if (cached && cached.dateKey === todayKey) {
+        return {kind, text: cached.text, cached: true};
+      }
+
+      // Solo generare da zero consuma la quota condivisa.
+      requireAnalisiQuotaAvailable(userData, isPremium);
+      const {summary} = await buildPersonalMonthlySummary(userId);
+
+      const model = genAI.getGenerativeModel({
+        model: "gemini-3.5-flash-lite",
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "object",
+            properties: {text: {type: "string"}},
+            required: ["text"],
+          },
+        },
+      });
+      const prompt = "Sei un consulente di budget personale. Basandoti " +
+        "SOLO sui dati reali forniti qui sotto (non inventare mai " +
+        "numeri), scrivi un unico consiglio pratico e specifico per " +
+        "oggi, in italiano, massimo due frasi, tono amichevole e " +
+        `concreto.\n${summary}`;
+      const result = await model.generateContent(prompt);
+      const parsed = JSON.parse(result.response.text());
+      const text = typeof parsed.text === "string" ? parsed.text : "";
+
+      await userRef.set({
+        aiDailyTip: {
+          text, dateKey: todayKey, generatedAt: now.toISOString(),
+        },
+      }, {merge: true});
+      await incrementAnalisiQuota(userRef);
+
+      return {kind, text, cached: false};
     }
-    const summary = typeof request.data.summary === "string" ?
-      request.data.summary : "";
 
-    const model = genAI.getGenerativeModel({model: "gemini-3.5-flash-lite"});
-    const prompt = "Sei un consulente di budget personale. In una sola " +
-      "frase breve in italiano, conferma di aver ricevuto questo " +
-      `riepilogo e ripeti il numero principale che contiene: ${summary}`;
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    if (kind === "monthly_report") {
+      const monthKey = now.toISOString().slice(0, 7); // yyyy-MM
+      const cached = userData.aiMonthlyReport;
+      if (cached && cached.monthKey === monthKey) {
+        return {kind, ...cached, cached: true};
+      }
 
-    // 3. Aggiorna il contatore condiviso SOLO dopo una risposta riuscita.
-    await incrementAnalisiQuota(userRef);
+      requireAnalisiQuotaAvailable(userData, isPremium);
+      const {summary, totalEntrate, totalSpeso} =
+        await buildPersonalMonthlySummary(userId);
 
-    return {kind, text};
+      const model = genAI.getGenerativeModel({
+        model: "gemini-3.5-flash-lite",
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "object",
+            properties: {
+              puntoDiForza: {type: "string"},
+              attenzione: {type: "string"},
+              consiglio: {type: "string"},
+            },
+            required: ["puntoDiForza", "attenzione", "consiglio"],
+          },
+        },
+      });
+      const prompt = "Sei un consulente di budget personale. Basandoti " +
+        "SOLO sui dati reali forniti qui sotto (non inventare mai " +
+        "numeri), scrivi in italiano tre frasi brevi e distinte per un " +
+        "report mensile: \"puntoDiForza\" (cosa sta andando bene), " +
+        "\"attenzione\" (cosa richiede attenzione), \"consiglio\" " +
+        "(un'azione concreta da fare questo mese). Una sola frase per " +
+        `campo, tono amichevole, mai giudicante.\n${summary}`;
+      const result = await model.generateContent(prompt);
+      const parsed = JSON.parse(result.response.text());
+
+      const report = {
+        puntoDiForza: typeof parsed.puntoDiForza === "string" ?
+          parsed.puntoDiForza : "",
+        attenzione: typeof parsed.attenzione === "string" ?
+          parsed.attenzione : "",
+        consiglio: typeof parsed.consiglio === "string" ?
+          parsed.consiglio : "",
+        totalEntrate,
+        totalSpeso,
+        monthKey,
+        generatedAt: now.toISOString(),
+      };
+
+      await userRef.set({aiMonthlyReport: report}, {merge: true});
+      await incrementAnalisiQuota(userRef);
+
+      return {kind, ...report, cached: false};
+    }
+
+    throw new HttpsError(
+        "invalid-argument",
+        `Tipo di insight non supportato: "${kind}".`,
+    );
   } catch (error) {
     console.error("ERRORE GENERATE AI INSIGHT:", error);
     if (error instanceof HttpsError) {

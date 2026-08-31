@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
 import '../services/budget_insights.dart';
+import '../services/ai_service.dart';
 import '../models/envelope.dart';
 import '../models/expense.dart';
 import '../models/income.dart';
@@ -562,6 +563,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Su Free mostra l'invito al trial (invariato). Su Premium/Trial mostra
+  /// il "Consiglio di oggi" reale, generato una volta al giorno dalla
+  /// Cloud Function generateAiInsight e servito dalla cache per il resto
+  /// delle aperture — vedi _DailyTipContent.
   Widget _aiInsightCard(BuildContext context) {
     return StreamBuilder<AppUser>(
       stream: _service.streamUser(),
@@ -574,6 +579,7 @@ class _HomeScreenState extends State<HomeScreen> {
             borderRadius: BorderRadius.circular(16),
           ),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const CircleAvatar(
                 backgroundColor: AppColors.primary,
@@ -581,52 +587,153 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      "L'AI ha analizzato le tue spese",
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      hasAi
-                          ? 'Apri l\'AI Assistant per i consigli aggiornati.'
-                          : 'Attiva il trial per scoprire dove puoi risparmiare.',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.neutral,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    GestureDetector(
-                      onTap: () async {
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                hasAi ? const AiChatScreen() : PremiumScreen(),
+                child: hasAi
+                    ? _DailyTipContent(
+                        onOpenChat: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const AiChatScreen(),
+                            ),
+                          );
+                          _refresh();
+                        },
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            "L'AI ha analizzato le tue spese",
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
                           ),
-                        );
-                        _refresh();
-                      },
-                      child: Text(
-                        hasAi ? 'Apri chat →' : 'Scopri come →',
-                        style: const TextStyle(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
+                          const SizedBox(height: 2),
+                          const Text(
+                            'Attiva il trial per scoprire dove puoi '
+                            'risparmiare.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.neutral,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          GestureDetector(
+                            onTap: () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => PremiumScreen(),
+                                ),
+                              );
+                              _refresh();
+                            },
+                            child: const Text(
+                              'Scopri come →',
+                              style: TextStyle(
+                                color: AppColors.primary,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
-                ),
               ),
             ],
           ),
+        );
+      },
+    );
+  }
+}
+
+/// Contenuto del "Consiglio di oggi": legge la cache aiDailyTip e, solo se
+/// non è più valida per la data odierna, chiede alla Cloud Function di
+/// rigenerarla (che a sua volta la riscrive in cache) — mai più di una
+/// generazione al giorno per utente.
+class _DailyTipContent extends StatefulWidget {
+  const _DailyTipContent({required this.onOpenChat});
+
+  final VoidCallback onOpenChat;
+
+  @override
+  State<_DailyTipContent> createState() => _DailyTipContentState();
+}
+
+class _DailyTipContentState extends State<_DailyTipContent> {
+  final _service = FirestoreService();
+  final _aiService = AiService();
+  bool _generating = false;
+  String? _error;
+
+  String get _todayKey {
+    final now = DateTime.now();
+    final month = now.month.toString().padLeft(2, '0');
+    final day = now.day.toString().padLeft(2, '0');
+    return '${now.year}-$month-$day';
+  }
+
+  void _ensureFresh(AiDailyTip? cached) {
+    if (_generating || (cached != null && cached.dateKey == _todayKey)) {
+      return;
+    }
+    _generating = true;
+    _aiService.generateInsight(kind: 'daily_tip').then((_) {
+      if (mounted) setState(() => _generating = false);
+    }).catchError((Object e) {
+      if (mounted) {
+        setState(() {
+          _generating = false;
+          _error = e.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<AiDailyTip?>(
+      stream: _service.streamAiDailyTip(),
+      builder: (context, snapshot) {
+        final cached = snapshot.data;
+        final isFresh = cached != null && cached.dateKey == _todayKey;
+        if (!isFresh) {
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _ensureFresh(cached),
+          );
+        }
+
+        final subtitle = isFresh
+            ? cached.text
+            : (_error ?? 'Sto preparando il tuo consiglio di oggi...');
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Consiglio di oggi',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              style: const TextStyle(fontSize: 12, color: AppColors.neutral),
+            ),
+            const SizedBox(height: 6),
+            GestureDetector(
+              onTap: widget.onOpenChat,
+              child: const Text(
+                'Chiedi all\'AI →',
+                style: TextStyle(
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
         );
       },
     );

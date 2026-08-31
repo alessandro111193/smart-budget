@@ -243,6 +243,38 @@ class FirestoreService {
       'shoppingListChecked': <String>[],
     }, SetOptions(merge: true));
   }
+
+  // Cache dei contenuti AI proattivi (Consiglio del giorno / Report
+  // mensile), scritta dalla Cloud Function generateAiInsight. Anche questi
+  // sono campi sul documento utente esistente, stesso motivo dello stato
+  // della lista della spesa: zero modifiche alle Firestore Rules.
+  Stream<AiDailyTip?> streamAiDailyTip() {
+    return _userDoc.snapshots().map((doc) {
+      final data = doc.data() as Map<String, dynamic>? ?? {};
+      final raw = data['aiDailyTip'] as Map<String, dynamic>?;
+      if (raw == null) return null;
+      return AiDailyTip(
+        text: raw['text'] as String? ?? '',
+        dateKey: raw['dateKey'] as String? ?? '',
+      );
+    });
+  }
+
+  Stream<AiMonthlyReport?> streamAiMonthlyReport() {
+    return _userDoc.snapshots().map((doc) {
+      final data = doc.data() as Map<String, dynamic>? ?? {};
+      final raw = data['aiMonthlyReport'] as Map<String, dynamic>?;
+      if (raw == null) return null;
+      return AiMonthlyReport(
+        monthKey: raw['monthKey'] as String? ?? '',
+        puntoDiForza: raw['puntoDiForza'] as String? ?? '',
+        attenzione: raw['attenzione'] as String? ?? '',
+        consiglio: raw['consiglio'] as String? ?? '',
+        totalEntrate: (raw['totalEntrate'] as num?)?.toDouble() ?? 0,
+        totalSpeso: (raw['totalSpeso'] as num?)?.toDouble() ?? 0,
+      );
+    });
+  }
 }
 
 class ShoppingListState {
@@ -250,4 +282,31 @@ class ShoppingListState {
   final List<String> manualItems;
 
   ShoppingListState({required this.checked, required this.manualItems});
+}
+
+class AiDailyTip {
+  final String text;
+  final String dateKey;
+
+  AiDailyTip({required this.text, required this.dateKey});
+}
+
+class AiMonthlyReport {
+  final String monthKey;
+  final String puntoDiForza;
+  final String attenzione;
+  final String consiglio;
+  final double totalEntrate;
+  final double totalSpeso;
+
+  AiMonthlyReport({
+    required this.monthKey,
+    required this.puntoDiForza,
+    required this.attenzione,
+    required this.consiglio,
+    required this.totalEntrate,
+    required this.totalSpeso,
+  });
+
+  double get risparmio => totalEntrate - totalSpeso;
 }

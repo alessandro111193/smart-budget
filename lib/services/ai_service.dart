@@ -115,6 +115,28 @@ class AiService {
       );
     }
   }
+
+  /// Genera (o restituisce dalla cache lato server, se ancora valida per
+  /// oggi/questo mese) un insight AI proattivo: "daily_tip" o
+  /// "monthly_report". Non serve passare alcun riepilogo: per questi kind
+  /// la Cloud Function aggrega i dati direttamente da Firestore.
+  Future<Map<String, dynamic>> generateInsight({required String kind}) async {
+    final callable = _functions.httpsCallable('generateAiInsight');
+    try {
+      final result = await callable.call({'kind': kind});
+      return Map<String, dynamic>.from(result.data as Map);
+    } on FirebaseFunctionsException catch (e) {
+      if (e.code == 'resource-exhausted') {
+        throw Exception('Hai raggiunto il limite di analisi AI del trial.');
+      }
+      if (e.code == 'permission-denied') {
+        throw Exception('Questa funzione richiede Premium.');
+      }
+      throw Exception('Errore nella generazione dell\'insight: ${e.message}');
+    } catch (e) {
+      throw Exception('Errore imprevisto durante la generazione.');
+    }
+  }
 }
 
 /// Risultato di [AiService.suggestIncomeDistribution]: quanto assegnare a
