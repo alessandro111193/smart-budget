@@ -311,8 +311,9 @@ exports.scanReceipt = onCall({timeoutSeconds: 120}, async (request) => {
 //     mensili per categoria, variazioni recenti) costruito lato client
 //     con HabitInsights.buildSummary, come chatWithAssistant. On-demand,
 //     nessuna cache.
-//   - "family_analysis" (Blocco 8): riceverà anch'esso un summary
-//     compatto costruito lato client.
+//   - "family_analysis" (Blocco 8): riceve un summary compatto costruito
+//     lato client con FamilyInsights.buildSummary. On-demand, nessuna
+//     cache; mai giudizi sulle persone.
 
 /**
  * Aggrega, solo con letture Firestore (Admin SDK, nessuna chiamata AI), un
@@ -546,6 +547,50 @@ exports.generateAiInsight = onCall({timeoutSeconds: 120}, async (request) => {
         "pattern o una variazione significativa nelle abitudini di " +
         "spesa, poi concludi con un consiglio pratico e specifico per " +
         `risparmiare. Tono amichevole, mai giudicante.\n${summary}`;
+      const result = await model.generateContent(prompt);
+      const parsed = JSON.parse(result.response.text());
+      const text = typeof parsed.text === "string" ? parsed.text : "";
+
+      await incrementAnalisiQuota(userRef);
+
+      return {kind, text};
+    }
+
+    if (kind === "family_analysis") {
+      // Blocco 8 del piano (punto 9): come habit_analysis, riceve un
+      // riepilogo già compatto costruito lato client con
+      // FamilyInsights.buildSummary (solo numeri/percentuali già
+      // calcolati). Il client legge i dati familiari solo tramite le
+      // Firestore Rules esistenti (isMember()): questa function non legge
+      // mai families/... per conto di un altro utente.
+      requireAnalisiQuotaAvailable(userData, isPremium);
+      const summary = typeof request.data.summary === "string" ?
+        request.data.summary : "";
+      if (!summary) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Serve un riepilogo delle spese familiari da analizzare.",
+        );
+      }
+
+      const model = genAI.getGenerativeModel({
+        model: "gemini-3.5-flash-lite",
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "object",
+            properties: {text: {type: "string"}},
+            required: ["text"],
+          },
+        },
+      });
+      const prompt = "Sei un consulente di budget familiare. Basandoti " +
+        "SOLO sui dati reali forniti qui sotto (numeri e percentuali già " +
+        "calcolati, non inventare mai nulla), scrivi un'analisi breve in " +
+        "italiano (massimo 3 frasi) dell'andamento delle spese " +
+        "familiari. Fornisci solo informazioni utili per il budget: non " +
+        "esprimere MAI giudizi sulle persone o su chi spende di più, " +
+        `resta neutro e concreto.\n${summary}`;
       const result = await model.generateContent(prompt);
       const parsed = JSON.parse(result.response.text());
       const text = typeof parsed.text === "string" ? parsed.text : "";

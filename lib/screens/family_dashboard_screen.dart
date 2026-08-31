@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../models/app_user.dart';
 import '../models/family.dart';
 import '../models/family_expense.dart';
 import '../models/envelope.dart';
+import '../services/ai_service.dart';
+import '../services/family_insights.dart';
 import '../services/family_service.dart';
+import '../services/firestore_service.dart';
 import 'new_family_envelope_screen.dart';
 import 'new_family_income_screen.dart';
 
@@ -53,6 +57,8 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
                       _scopeSelector(members),
                       const SizedBox(height: 16),
                       _totalsCard(expenses, members),
+                      const SizedBox(height: 12),
+                      _FamilyAnalysisCard(expenses: expenses, members: members),
                       const SizedBox(height: 16),
                       const Text(
                         'Buste condivise',
@@ -238,6 +244,162 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
         ),
       ),
+    );
+  }
+}
+
+/// Punto 9 del piano AI Premium: confronto mese su mese delle spese
+/// familiari (totale e per membro) già calcolato in Dart
+/// (FamilyInsights, zero costo); solo la narrazione finale passa da
+/// Gemini, on-demand, sempre con l'istruzione esplicita di non giudicare
+/// nessuno. Visibile solo a Premium/Trial (l'accesso AI è personale, non
+/// di famiglia, quindi si verifica con FirestoreService.streamUser()).
+class _FamilyAnalysisCard extends StatefulWidget {
+  const _FamilyAnalysisCard({required this.expenses, required this.members});
+
+  final List<FamilyExpense> expenses;
+  final List<FamilyMember> members;
+
+  @override
+  State<_FamilyAnalysisCard> createState() => _FamilyAnalysisCardState();
+}
+
+class _FamilyAnalysisCardState extends State<_FamilyAnalysisCard> {
+  final _service = FirestoreService();
+  final _aiService = AiService();
+  bool _loading = false;
+  String? _result;
+  String? _error;
+
+  Future<void> _analyze() async {
+    final summary = FamilyInsights.buildSummary(
+      widget.expenses,
+      widget.members,
+    );
+    if (summary.isEmpty) {
+      setState(() {
+        _error = 'Non ci sono ancora spese familiari sufficienti per '
+            'un\'analisi.';
+      });
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final data = await _aiService.generateInsight(
+        kind: 'family_analysis',
+        summary: summary,
+      );
+      if (!mounted) return;
+      setState(() {
+        _result = data['text'] as String? ?? '';
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString().replaceFirst('Exception: ', '');
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<AppUser>(
+      stream: _service.streamUser(),
+      builder: (context, snapshot) {
+        final hasAi = snapshot.data?.hasAiAccess ?? false;
+        if (!hasAi) return const SizedBox.shrink();
+
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const CircleAvatar(
+                    radius: 14,
+                    backgroundColor: AppColors.primary,
+                    child: Icon(
+                      Icons.smart_toy,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Analisi AI della famiglia',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (_result != null) ...[
+                const SizedBox(height: 10),
+                Text(_result!, style: const TextStyle(fontSize: 13)),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  _error!,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.danger,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _loading ? null : _analyze,
+                  icon: _loading
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.primary,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.insights_outlined,
+                          size: 18,
+                          color: AppColors.primary,
+                        ),
+                  label: Text(
+                    _loading
+                        ? 'Sto analizzando...'
+                        : (_result == null
+                            ? 'Analizza le spese della famiglia'
+                            : 'Rianalizza'),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    side: const BorderSide(color: AppColors.primary),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
