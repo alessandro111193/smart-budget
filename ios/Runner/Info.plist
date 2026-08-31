@@ -66,5 +66,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- App ID di TEST pubblicato da Google (vedi lib/services/ad_service.dart):
+	     sicuro da usare in sviluppo, non richiede un account AdMob.
+	     TODO(admob-console): sostituire con l'App ID reale prima della
+	     pubblicazione su App Store. -->
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-3940256099942544~1458002511</string>
 </dict>
 </plist>

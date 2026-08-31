@@ -176,7 +176,15 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Scanner scontrino')),
+      appBar: AppBar(
+        title: const Text(
+          'Scanner scontrino',
+          style: TextStyle(color: AppColors.ink, fontSize: 17),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.ink),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -203,9 +211,17 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                 ),
                 onPressed: _canScan && !_loading ? _scan : null,
-                child: const Text('Scansiona'),
+                child: const Text(
+                  'Scansiona',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -230,12 +246,23 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
                   },
                 ),
               ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: _products.isEmpty ? null : _saveAll,
+                  child: Text(
+                    'Salva ${_products.length} spese',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ),
-                onPressed: _products.isEmpty ? null : _saveAll,
-                child: Text('Salva ${_products.length} spese'),
               ),
             ],
           ],
@@ -271,6 +298,16 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
           _error = null;
         });
       },
+      style: SegmentedButton.styleFrom(
+        backgroundColor: const Color(0xFFF8FAFC),
+        foregroundColor: AppColors.neutral,
+        selectedBackgroundColor: AppColors.primary.withOpacity(0.12),
+        selectedForegroundColor: AppColors.primary,
+        side: BorderSide(color: Colors.grey.shade200),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
     );
   }
 
@@ -279,50 +316,46 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
     required Uint8List? bytes,
     required void Function(ImageSource) onPick,
   }) {
-    return Card(
-      margin: EdgeInsets.zero,
-      color: const Color(0xFFF8FAFC),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Row(
-          children: [
-            if (bytes != null)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.memory(
-                  bytes,
-                  width: 48,
-                  height: 48,
-                  fit: BoxFit.cover,
-                ),
-              )
-            else
-              Container(
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          if (bytes != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: Image.memory(
+                bytes,
                 width: 48,
                 height: 48,
-                decoration: BoxDecoration(
-                  color: AppColors.neutral.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.image_outlined, color: AppColors.neutral),
+                fit: BoxFit.cover,
               ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                bytes != null ? '$label pronta' : label,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
+            )
+          else
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: AppColors.accent.withOpacity(0.12),
+              child: const Icon(Icons.image_outlined, color: AppColors.accent),
             ),
-            IconButton(
-              icon: const Icon(Icons.camera_alt, color: AppColors.primary),
-              onPressed: () => onPick(ImageSource.camera),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              bytes != null ? '$label pronta' : label,
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
-            IconButton(
-              icon: const Icon(Icons.photo_library, color: AppColors.primary),
-              onPressed: () => onPick(ImageSource.gallery),
-            ),
-          ],
-        ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.camera_alt, color: AppColors.primary),
+            onPressed: () => onPick(ImageSource.camera),
+          ),
+          IconButton(
+            icon: const Icon(Icons.photo_library, color: AppColors.primary),
+            onPressed: () => onPick(ImageSource.gallery),
+          ),
+        ],
       ),
     );
   }
@@ -331,9 +364,14 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
     final product = _products[index];
     final showAbbinato = _mode == _PhotoMode.both;
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 10),
+      elevation: 0,
+      color: const Color(0xFFF8FAFC),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

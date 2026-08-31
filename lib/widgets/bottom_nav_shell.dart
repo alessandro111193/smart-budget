@@ -9,6 +9,7 @@ import '../screens/ai_chat_screen.dart';
 import '../screens/premium_screen.dart';
 import '../services/firestore_service.dart';
 import '../models/app_user.dart';
+import 'free_ad_banner.dart';
 
 class BottomNavShell extends StatefulWidget {
   const BottomNavShell({super.key});
@@ -37,37 +38,51 @@ class _BottomNavShellState extends State<BottomNavShell> {
       ),
     ];
 
-    return Scaffold(
-      body: IndexedStack(index: _index, children: screens),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _index,
-        onTap: (i) => setState(() => _index = i),
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: AppColors.primary,
-        unselectedItemColor: AppColors.neutral,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            label: 'Home',
+    return StreamBuilder<AppUser>(
+      stream: _service.streamUser(),
+      builder: (context, userSnapshot) {
+        // Solo il piano Free (né Premium né Trial attivo) vede pubblicità.
+        final isFree = !(userSnapshot.data?.hasAiAccess ?? true);
+
+        return Scaffold(
+          body: IndexedStack(index: _index, children: screens),
+          bottomNavigationBar: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FreeAdBanner(show: isFree),
+              BottomNavigationBar(
+                currentIndex: _index,
+                onTap: (i) => setState(() => _index = i),
+                type: BottomNavigationBarType.fixed,
+                selectedItemColor: AppColors.primary,
+                unselectedItemColor: AppColors.neutral,
+                items: const [
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.home_outlined),
+                    label: 'Home',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.folder_outlined),
+                    label: 'Buste',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.receipt_long_outlined),
+                    label: 'Spese',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.bar_chart_outlined),
+                    label: 'Statistiche',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.smart_toy_outlined),
+                    label: 'AI',
+                  ),
+                ],
+              ),
+            ],
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.folder_outlined),
-            label: 'Buste',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.receipt_long_outlined),
-            label: 'Spese',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.bar_chart_outlined),
-            label: 'Statistiche',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.smart_toy_outlined),
-            label: 'AI',
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

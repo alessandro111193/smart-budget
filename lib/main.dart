@@ -9,6 +9,7 @@ import 'firebase_options.dart';
 import 'theme/app_theme.dart';
 import 'widgets/bottom_nav_shell.dart';
 import 'screens/login_screen.dart';
+import 'services/ad_service.dart';
 
 // Metti questo a false quando vuoi testare contro Firebase vero
 // anche da un ambiente di sviluppo (utile per verificare la build release
@@ -28,6 +29,8 @@ void main() async {
     FirebaseAuth.instance.useAuthEmulator('127.0.0.1', 9099);
     FirebaseFirestore.instance.useFirestoreEmulator('127.0.0.1', 8080);
   }
+
+  await AdService.initialize();
 
   runApp(const SmartBudgetApp());
 }

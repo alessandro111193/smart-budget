@@ -30,6 +30,13 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- App ID di TEST pubblicato da Google (vedi lib/services/ad_service.dart):
+             sicuro da usare in sviluppo, non richiede un account AdMob.
+             TODO(admob-console): sostituire con l'App ID reale prima della
+             pubblicazione su Play Store. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

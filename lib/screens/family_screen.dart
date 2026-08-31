@@ -11,10 +11,44 @@ class FamilyScreen extends StatelessWidget {
 
   final _service = FamilyService();
 
+  static InputDecoration _fieldDecoration({String? labelText}) {
+    return InputDecoration(
+      labelText: labelText,
+      filled: true,
+      fillColor: const Color(0xFFF8FAFC),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+    );
+  }
+
+  static ButtonStyle _primaryButtonStyle(Color color) {
+    return ElevatedButton.styleFrom(
+      backgroundColor: color,
+      foregroundColor: Colors.white,
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+      ),
+      textStyle: const TextStyle(fontWeight: FontWeight.bold),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Famiglia')),
+      appBar: AppBar(
+        title: const Text(
+          'Famiglia',
+          style: TextStyle(color: AppColors.ink, fontSize: 17),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.ink),
+      ),
       body: StreamBuilder<String?>(
         stream: _service.streamMyFamilyId(),
         builder: (context, snapshot) {
@@ -42,16 +76,19 @@ class FamilyScreen extends StatelessWidget {
           const SizedBox(height: 16),
           TextField(
             controller: nameController,
-            decoration: const InputDecoration(labelText: 'Nome della famiglia'),
+            decoration: _fieldDecoration(labelText: 'Nome della famiglia'),
           ),
           const SizedBox(height: 12),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-            onPressed: () async {
-              if (nameController.text.isEmpty) return;
-              await _service.createFamily(nameController.text);
-            },
-            child: const Text('Crea famiglia'),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: _primaryButtonStyle(AppColors.primary),
+              onPressed: () async {
+                if (nameController.text.isEmpty) return;
+                await _service.createFamily(nameController.text);
+              },
+              child: const Text('Crea famiglia'),
+            ),
           ),
           const SizedBox(height: 24),
           const Text(
@@ -79,9 +116,24 @@ class FamilyScreen extends StatelessWidget {
         return Column(
           children: invites.map((inv) {
             return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              elevation: 0,
+              color: const Color(0xFFF8FAFC),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
               child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: AppColors.secondary.withOpacity(0.12),
+                  child: const Icon(Icons.mail_outline, color: AppColors.secondary),
+                ),
                 title: Text('Invito per ${inv['email']}'),
                 trailing: ElevatedButton(
+                  style: _primaryButtonStyle(AppColors.primary).copyWith(
+                    padding: WidgetStateProperty.all(
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    ),
+                  ),
                   onPressed: () =>
                       _service.acceptInvite(inv['familyId'], inv['inviteId']),
                   child: const Text('Accetta'),
@@ -107,7 +159,10 @@ class FamilyScreen extends StatelessWidget {
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            const Text('Membri', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text(
+              'Membri',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
             const SizedBox(height: 8),
             StreamBuilder<List<FamilyMember>>(
               stream: _service.streamMembers(familyId),
@@ -117,6 +172,11 @@ class FamilyScreen extends StatelessWidget {
                   children: members.map((m) {
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
+                      elevation: 0,
+                      color: const Color(0xFFF8FAFC),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: Color(
@@ -127,9 +187,13 @@ class FamilyScreen extends StatelessWidget {
                             style: const TextStyle(color: Colors.white),
                           ),
                         ),
-                        title: Text(m.name),
+                        title: Text(
+                          m.name,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
                         subtitle: Text(
                           m.role == 'owner' ? 'Proprietario' : 'Membro',
+                          style: const TextStyle(color: AppColors.neutral),
                         ),
                       ),
                     );
@@ -137,16 +201,14 @@ class FamilyScreen extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             ElevatedButton.icon(
               onPressed: () => _showInviteDialog(context, familyId),
               icon: const Icon(Icons.person_add),
               label: const Text('Invita un membro'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.secondary,
-              ),
+              style: _primaryButtonStyle(AppColors.secondary),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             ElevatedButton.icon(
               onPressed: () => Navigator.push(
                 context,
@@ -156,11 +218,9 @@ class FamilyScreen extends StatelessWidget {
               ),
               icon: const Icon(Icons.dashboard_outlined),
               label: const Text('Apri dashboard famiglia'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accent,
-              ),
+              style: _primaryButtonStyle(AppColors.accent),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             ElevatedButton.icon(
               onPressed: () => Navigator.push(
                 context,
@@ -170,9 +230,7 @@ class FamilyScreen extends StatelessWidget {
               ),
               icon: const Icon(Icons.add_shopping_cart),
               label: const Text('Nuova spesa familiare'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.warning,
-              ),
+              style: _primaryButtonStyle(AppColors.warning),
             ),
           ],
         );
@@ -185,15 +243,19 @@ class FamilyScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
         title: const Text('Invita un membro'),
         content: TextField(
           controller: emailController,
-          decoration: const InputDecoration(labelText: 'Email della persona'),
+          decoration: _fieldDecoration(labelText: 'Email della persona'),
           keyboardType: TextInputType.emailAddress,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
+            style: TextButton.styleFrom(foregroundColor: AppColors.neutral),
             child: const Text('Annulla'),
           ),
           TextButton(
@@ -216,7 +278,11 @@ class FamilyScreen extends StatelessWidget {
                 }
               }
             },
-            child: const Text('Invita'),
+            style: TextButton.styleFrom(foregroundColor: AppColors.primary),
+            child: const Text(
+              'Invita',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),

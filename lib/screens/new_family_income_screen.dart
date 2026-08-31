@@ -22,10 +22,33 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
 
   double get _totalIncome => double.tryParse(_amountController.text) ?? 0;
 
+  static InputDecoration _fieldDecoration({String? labelText, String? prefixText}) {
+    return InputDecoration(
+      labelText: labelText,
+      prefixText: prefixText,
+      filled: true,
+      fillColor: const Color(0xFFF8FAFC),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Nuova entrata familiare')),
+      appBar: AppBar(
+        title: const Text(
+          'Nuova entrata familiare',
+          style: TextStyle(color: AppColors.ink, fontSize: 17),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.ink),
+      ),
       body: StreamBuilder<List<FamilyMember>>(
         stream: _service.streamMembers(widget.familyId),
         builder: (context, memberSnapshot) {
@@ -59,25 +82,26 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
                             TextField(
                               controller: _amountController,
                               keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
+                              decoration: _fieldDecoration(
                                 labelText: 'Importo totale (€)',
                               ),
                               onChanged: (_) => setLocal(() {}),
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 12),
                             TextField(
                               controller: _descriptionController,
-                              decoration: const InputDecoration(
+                              decoration: _fieldDecoration(
                                 labelText: 'Descrizione',
                               ),
                             ),
                             const SizedBox(height: 12),
-                            DropdownButton<String?>(
+                            DropdownButtonFormField<String?>(
                               hint: const Text(
                                 'Entrata del nucleo o di un membro?',
                               ),
-                              value: _selectedMemberId,
+                              initialValue: _selectedMemberId,
                               isExpanded: true,
+                              decoration: _fieldDecoration(),
                               items: [
                                 const DropdownMenuItem(
                                   value: null,
@@ -98,23 +122,33 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
                       ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('Assegnato: €${assigned.toStringAsFixed(2)}'),
-                            Text(
-                              'Da assegnare: €${remaining.toStringAsFixed(2)}',
-                              style: TextStyle(
-                                color: remaining == 0
-                                    ? AppColors.primary
-                                    : AppColors.warning,
-                                fontWeight: FontWeight.bold,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Assegnato: €${assigned.toStringAsFixed(2)}'),
+                              Text(
+                                'Da assegnare: €${remaining.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  color: remaining == 0
+                                      ? AppColors.primary
+                                      : AppColors.warning,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                      const Divider(),
+                      const SizedBox(height: 12),
                       Expanded(
                         child: ListView.builder(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -129,13 +163,13 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
                                     child: Text('${env.icon} ${env.name}'),
                                   ),
                                   SizedBox(
-                                    width: 110,
+                                    width: 120,
                                     child: TextField(
                                       controller:
                                           _allocationControllers[env.id],
                                       keyboardType: TextInputType.number,
                                       textAlign: TextAlign.right,
-                                      decoration: const InputDecoration(
+                                      decoration: _fieldDecoration(
                                         prefixText: '€ ',
                                       ),
                                       onChanged: (_) => setLocal(() {}),
@@ -154,6 +188,11 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
                           child: ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
                             ),
                             onPressed: remaining == 0 && assigned > 0
                                 ? () async {
@@ -172,7 +211,10 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
                                     if (context.mounted) Navigator.pop(context);
                                   }
                                 : null,
-                            child: const Text('Distribuisci entrata'),
+                            child: const Text(
+                              'Distribuisci entrata',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
                           ),
                         ),
                       ),

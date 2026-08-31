@@ -23,7 +23,15 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Dashboard Famiglia')),
+      appBar: AppBar(
+        title: const Text(
+          'Dashboard Famiglia',
+          style: TextStyle(color: AppColors.ink, fontSize: 17),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.ink),
+      ),
       body: StreamBuilder<List<FamilyMember>>(
         stream: _service.streamMembers(widget.familyId),
         builder: (context, memberSnapshot) {
@@ -58,6 +66,12 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
                         children: [
                           Expanded(
                             child: TextButton.icon(
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppColors.primary,
+                                textStyle: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               onPressed: () => Navigator.push(
                                 context,
                                 MaterialPageRoute(
@@ -72,6 +86,12 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
                           ),
                           Expanded(
                             child: TextButton.icon(
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppColors.primary,
+                                textStyle: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               onPressed: () => Navigator.push(
                                 context,
                                 MaterialPageRoute(
@@ -185,19 +205,37 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
   }
 
   Widget _envelopeTile(Envelope e) {
+    final index = e.id.hashCode % AppColors.envelopeColors.length;
+    final color = AppColors.envelopeColors[index.abs()];
     final percent = e.budget == 0 ? 0.0 : (e.budget - e.balance) / e.budget;
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 10),
+      elevation: 0,
+      color: const Color(0xFFF8FAFC),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: ListTile(
-        leading: Text(e.icon, style: const TextStyle(fontSize: 18)),
-        title: Text(e.name),
-        subtitle: LinearProgressIndicator(
-          value: percent.clamp(0, 1),
-          color: AppColors.primary,
-          backgroundColor: Colors.grey.shade200,
+        leading: CircleAvatar(
+          backgroundColor: color.withOpacity(0.15),
+          child: Text(e.icon, style: const TextStyle(fontSize: 18)),
+        ),
+        title: Text(e.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: percent.clamp(0, 1),
+              color: color,
+              backgroundColor: Colors.grey.shade200,
+              minHeight: 5,
+            ),
+          ),
         ),
         trailing: Text(
           '€${e.balance.toStringAsFixed(0)} / €${e.budget.toStringAsFixed(0)}',
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
         ),
       ),
     );

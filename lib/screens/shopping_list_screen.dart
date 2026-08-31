@@ -100,11 +100,17 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Lista della spesa'),
+        title: const Text(
+          'Lista della spesa',
+          style: TextStyle(color: AppColors.ink, fontSize: 17),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.ink),
         actions: [
           IconButton(
             tooltip: 'Segna tutto da ricomprare',
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: AppColors.ink),
             onPressed: () => _service.clearShoppingListChecks(),
           ),
         ],
@@ -180,17 +186,29 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
         Expanded(
           child: TextField(
             controller: _addController,
-            decoration: const InputDecoration(
-              labelText: 'Aggiungi un articolo',
+            decoration: InputDecoration(
+              hintText: 'Aggiungi un articolo',
               isDense: true,
+              filled: true,
+              fillColor: const Color(0xFFF8FAFC),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
             ),
             onSubmitted: (_) => _addManualItem(),
           ),
         ),
-        const SizedBox(width: 8),
-        IconButton(
-          icon: const Icon(Icons.add_circle, color: AppColors.primary),
-          onPressed: _addManualItem,
+        const SizedBox(width: 10),
+        CircleAvatar(
+          radius: 22,
+          backgroundColor: AppColors.primary,
+          child: IconButton(
+            icon: const Icon(Icons.add, color: Colors.white),
+            onPressed: _addManualItem,
+          ),
         ),
       ],
     );
@@ -198,19 +216,22 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
 
   Widget _sectionTitle(String title) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6, top: 6),
+      padding: const EdgeInsets.only(bottom: 8, top: 6),
       child: Text(
         title,
-        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
       ),
     );
   }
 
   Widget _manualItemTile(String name, bool checked) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 10),
       elevation: 0,
       color: const Color(0xFFF8FAFC),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: CheckboxListTile(
         value: checked,
         activeColor: AppColors.primary,
@@ -234,9 +255,12 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
 
   Widget _suggestionTile(_Suggestion s, bool checked) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 10),
       elevation: 0,
       color: const Color(0xFFF8FAFC),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: CheckboxListTile(
         value: checked,
         activeColor: AppColors.primary,

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../models/challenge.dart';
+import '../services/ai_service.dart';
+import '../services/firestore_service.dart';
 
 class ChatMessage {
   final String text;
@@ -21,6 +24,8 @@ class AiChatScreen extends StatefulWidget {
 class _AiChatScreenState extends State<AiChatScreen> {
   final List<ChatMessage> _messages = [];
   final TextEditingController _controller = TextEditingController();
+  final _aiService = AiService();
+  final _firestoreService = FirestoreService();
   bool _isLoading = false;
 
   @override
@@ -29,38 +34,97 @@ class _AiChatScreenState extends State<AiChatScreen> {
     super.dispose();
   }
 
-  void _sendMessage() {
+  Future<void> _sendMessage() async {
     final text = _controller.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || _isLoading) return;
 
     setState(() {
       _messages.add(ChatMessage(text: text, isUser: true));
       _isLoading = true;
     });
-
     _controller.clear();
 
-    // Risposta simulata dell'assistente AI (da integrare con Cloud Function/Gemini API)
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted) {
-        setState(() {
-          _messages.add(
-            ChatMessage(
-              text:
-                  'Sto analizzando i tuoi dati di spesa per darti un consiglio personalizzato su: "$text"',
-              isUser: false,
-            ),
-          );
-          _isLoading = false;
-        });
-      }
-    });
+    String answer;
+    try {
+      final summary = await _buildSpendingSummary();
+      answer = await _aiService.askAssistant(text, summary);
+    } catch (_) {
+      answer = 'Si è verificato un errore, riprova.';
+    }
+
+    if (mounted) {
+      setState(() {
+        _messages.add(ChatMessage(text: answer, isUser: false));
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// Riassunto compatto (pochi numeri aggregati, mai transazioni singole né
+  /// dati familiari) da passare a `chatWithAssistant`: tiene bassi i token
+  /// e quindi il costo per richiesta, come da nota economica in CLAUDE.md.
+  Future<String> _buildSpendingSummary() async {
+    final now = DateTime.now();
+    final expenses = await _firestoreService.streamExpenses().first;
+    final incomes = await _firestoreService.streamIncomes().first;
+    final challenges = await _firestoreService.streamChallenges().first;
+
+    final monthExpenses = expenses.where(
+      (e) => e.date.year == now.year && e.date.month == now.month,
+    );
+    final monthIncomes = incomes.where(
+      (i) => i.date.year == now.year && i.date.month == now.month,
+    );
+
+    final byCategory = <String, double>{};
+    for (final e in monthExpenses) {
+      byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amount;
+    }
+    final totalSpeso = byCategory.values.fold(0.0, (s, v) => s + v);
+    final totalEntrate = monthIncomes.fold(0.0, (s, i) => s + i.amount);
+
+    final buffer = StringBuffer();
+    if (byCategory.isNotEmpty) {
+      final categorie = byCategory.entries
+          .map((e) => '${e.key}: €${e.value.toStringAsFixed(0)}')
+          .join(', ');
+      buffer.writeln('Spese per categoria questo mese: $categorie.');
+    } else {
+      buffer.writeln('Nessuna spesa registrata questo mese.');
+    }
+    buffer.writeln(
+      'Entrate: €${totalEntrate.toStringAsFixed(2)}   |   '
+      'Spese: €${totalSpeso.toStringAsFixed(2)}',
+    );
+
+    final activeGoals = challenges.where(
+      (c) =>
+          c.type == ChallengeType.saving &&
+          c.percentComplete < 1 &&
+          c.monthlyQuota != null,
+    );
+    for (final goal in activeGoals) {
+      buffer.writeln(
+        'Obiettivo di risparmio "${goal.title}": quota mensile consigliata '
+        '€${goal.monthlyQuota!.toStringAsFixed(2)}.',
+      );
+    }
+
+    return buffer.toString().trim();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Assistente AI')),
+      appBar: AppBar(
+        title: const Text(
+          'Assistente AI',
+          style: TextStyle(color: AppColors.ink, fontSize: 17),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.ink),
+      ),
       body: Column(
         children: [
           Expanded(
@@ -68,7 +132,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
                 ? const Center(
                     child: Text(
                       'Fai una domanda al tuo assistente finanziario!',
-                      style: TextStyle(color: Colors.grey),
+                      style: TextStyle(color: AppColors.neutral),
                     ),
                   )
                 : ListView.builder(
@@ -83,26 +147,44 @@ class _AiChatScreenState extends State<AiChatScreen> {
           if (_isLoading)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8.0),
-              child: CircularProgressIndicator(),
+              child: CircularProgressIndicator(color: AppColors.primary),
             ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            color: Theme.of(context).cardColor,
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+            color: Colors.white,
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
                   child: TextField(
                     controller: _controller,
-                    decoration: const InputDecoration(
+                    minLines: 1,
+                    maxLines: 4,
+                    decoration: InputDecoration(
                       hintText: 'Chiedi qualcosa all\'AI...',
-                      border: InputBorder.none,
+                      isDense: true,
+                      filled: true,
+                      fillColor: const Color(0xFFF8FAFC),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        borderSide: BorderSide.none,
+                      ),
                     ),
                     onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.send, color: AppColors.primary),
-                  onPressed: _sendMessage,
+                const SizedBox(width: 8),
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: AppColors.primary,
+                  child: IconButton(
+                    icon: const Icon(Icons.send, color: Colors.white, size: 18),
+                    onPressed: _sendMessage,
+                  ),
                 ),
               ],
             ),
@@ -114,28 +196,43 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
   Widget _buildMessageBubble(ChatMessage message) {
     final isUser = message.isUser;
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: isUser ? AppColors.primary : Colors.grey.shade200,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(isUser ? 16 : 0),
-            bottomRight: Radius.circular(isUser ? 0 : 16),
-          ),
-        ),
-        child: Text(
-          message.text,
-          style: TextStyle(
-            color: isUser ? Colors.white : Colors.black87,
-            fontSize: 14,
-          ),
+    final bubble = Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: isUser ? AppColors.primary : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(16),
+          topRight: const Radius.circular(16),
+          bottomLeft: Radius.circular(isUser ? 16 : 4),
+          bottomRight: Radius.circular(isUser ? 4 : 16),
         ),
       ),
+      child: Text(
+        message.text,
+        style: TextStyle(
+          color: isUser ? Colors.white : AppColors.ink,
+          fontSize: 14,
+        ),
+      ),
+    );
+
+    if (isUser) {
+      return Align(alignment: Alignment.centerRight, child: bubble);
+    }
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        const CircleAvatar(
+          radius: 14,
+          backgroundColor: AppColors.primary,
+          child: Icon(Icons.smart_toy, color: Colors.white, size: 14),
+        ),
+        const SizedBox(width: 8),
+        Flexible(child: bubble),
+      ],
     );
   }
 }
