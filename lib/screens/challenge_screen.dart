@@ -208,6 +208,32 @@ class ChallengeScreen extends StatelessWidget {
                 'Quota mensile consigliata: €${c.monthlyQuota!.toStringAsFixed(2)}',
                 style: const TextStyle(color: AppColors.neutral, fontSize: 12),
               ),
+            if (isSaving && c.isOnTrack != null) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: (c.isOnTrack!
+                          ? AppColors.primary
+                          : AppColors.warning)
+                      .withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  c.isOnTrack!
+                      ? 'In linea con il piano'
+                      : 'Sei indietro rispetto al piano',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: c.isOnTrack!
+                        ? AppColors.primary
+                        : AppColors.warning,
+                  ),
+                ),
+              ),
+            ],
             if (c.limitExceeded)
               const Text(
                 'Hai superato il tetto che ti eri dato.',

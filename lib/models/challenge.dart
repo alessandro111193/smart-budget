@@ -11,6 +11,12 @@ class Challenge {
   final DateTime? deadline;
   final String? envelopeId;
 
+  /// Quando la challenge è stata creata. Nullable perché le challenge
+  /// create prima dell'introduzione di questo campo non lo hanno: in quel
+  /// caso [isOnTrack] restituisce semplicemente null invece di un dato
+  /// inventato.
+  final DateTime? createdAt;
+
   Challenge({
     required this.id,
     required this.title,
@@ -19,6 +25,7 @@ class Challenge {
     required this.savedAmount,
     this.deadline,
     this.envelopeId,
+    this.createdAt,
   });
 
   /// Per "saving": quanto manca in percentuale verso l'obiettivo.
@@ -42,6 +49,33 @@ class Challenge {
   bool get limitExceeded =>
       type == ChallengeType.spendingLimit && savedAmount > targetAmount;
 
+  /// Punto 7 del piano AI Premium: controllo automatico "il piano sta
+  /// andando bene?" per le sfide di risparmio con scadenza — confronta il
+  /// progresso atteso (tempo trascorso dalla creazione / tempo totale a
+  /// disposizione) con quello reale (risparmiato / obiettivo). Solo
+  /// calcolo Dart, zero costo. Restituisce null quando manca [createdAt]
+  /// (challenge create prima dell'introduzione di questo campo) o
+  /// [deadline], invece di un giudizio inventato.
+  bool? get isOnTrack {
+    if (type != ChallengeType.saving ||
+        deadline == null ||
+        createdAt == null) {
+      return null;
+    }
+    final totalDays = deadline!.difference(createdAt!).inDays;
+    if (totalDays <= 0) return null;
+    final elapsedDays = DateTime.now()
+        .difference(createdAt!)
+        .inDays
+        .clamp(0, totalDays);
+    final expectedProgress = elapsedDays / totalDays;
+    final actualProgress = targetAmount == 0
+        ? 0.0
+        : (savedAmount / targetAmount).clamp(0.0, 1.0);
+    // Margine di tolleranza: non allarmare per scarti minimi.
+    return actualProgress >= expectedProgress - 0.05;
+  }
+
   /// Conversione da DocumentSnapshot di Firestore a oggetto Challenge
   factory Challenge.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>? ?? {};
@@ -59,6 +93,9 @@ class Challenge {
           ? (data['deadline'] as Timestamp).toDate()
           : null,
       envelopeId: data['envelopeId'] as String?,
+      createdAt: data['createdAt'] != null
+          ? (data['createdAt'] as Timestamp).toDate()
+          : null,
     );
   }
 
@@ -71,6 +108,7 @@ class Challenge {
       'savedAmount': savedAmount,
       'deadline': deadline != null ? Timestamp.fromDate(deadline!) : null,
       'envelopeId': envelopeId,
+      'createdAt': Timestamp.fromDate(createdAt ?? DateTime.now()),
     };
   }
 }
