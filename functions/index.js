@@ -11,6 +11,70 @@ const db = getFirestore();
 // La chiave viene letta SOLO da functions/.env
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// --- HELPER CONDIVISI: ACCESSO PREMIUM/TRIAL E QUOTA "ANALISI AVANZATE" ---
+//
+// Estratti da chatWithAssistant e scanReceipt (che li duplicavano) e usati
+// anche da tutte le nuove funzioni dell'AI Premium proattiva (Blocchi 3-9
+// del piano "consulente AI"), così il controllo di accesso resta un unico
+// punto invece di essere ricopiato in ognuna.
+
+/**
+ * Verifica che l'utente abbia accesso Premium o Trial attivo, altrimenti
+ * lancia HttpsError. Non fa alcuna verifica di limiti/contatori.
+ * @param {object} userData Dati del documento users/{uid}.
+ * @return {{isPremium: boolean, isTrialActive: boolean}} stato accesso.
+ */
+function requireActiveAccess(userData) {
+  const isPremium = userData.isPremium === true;
+  const trialEnd = userData.trialEnd ? new Date(userData.trialEnd) : null;
+  const isTrialActive = Boolean(trialEnd && trialEnd > new Date());
+
+  if (!isPremium && !isTrialActive) {
+    throw new HttpsError(
+        "permission-denied",
+        "Funzione riservata agli utenti Premium.",
+    );
+  }
+  return {isPremium, isTrialActive};
+}
+
+// Stesso limite di AppUser.trialMaxAnalisi in lib/models/app_user.dart:
+// va tenuto allineato manualmente, come già per gli altri due contatori.
+const TRIAL_MAX_ANALISI_AVANZATE = 10;
+
+/**
+ * Verifica che l'utente non abbia esaurito la quota trial di "analisi
+ * avanzate" (contatore condiviso da tutte le funzioni AI Premium proattive:
+ * distribuzione entrate, consiglio del giorno, report mensile, analisi
+ * abitudini, insight famiglia, lista spesa assistita). Non incrementa nulla:
+ * l'incremento va fatto con incrementAnalisiQuota SOLO dopo una risposta
+ * riuscita di Gemini, mai prima.
+ * @param {object} userData Dati del documento users/{uid}.
+ * @param {boolean} isPremium Se true, nessun limite si applica.
+ */
+function requireAnalisiQuotaAvailable(userData, isPremium) {
+  const analisiUsate = userData.analisiAvanzateUsate || 0;
+  if (!isPremium && analisiUsate >= TRIAL_MAX_ANALISI_AVANZATE) {
+    throw new HttpsError(
+        "resource-exhausted",
+        "Hai raggiunto il limite di analisi AI del trial.",
+    );
+  }
+}
+
+/**
+ * Incrementa il contatore condiviso analisiAvanzateUsate. Va chiamata solo
+ * dopo che la generazione AI è andata a buon fine.
+ * @param {FirebaseFirestore.DocumentReference} userRef Riferimento a
+ *   users/{uid}.
+ */
+async function incrementAnalisiQuota(userRef) {
+  await userRef.set(
+      {analisiAvanzateUsate: FieldValue.increment(1)},
+      {merge: true},
+  );
+}
+
 exports.chatWithAssistant = onCall({timeoutSeconds: 120}, async (request) => {
   try {
     // 1. Verifica autenticazione
@@ -23,16 +87,7 @@ exports.chatWithAssistant = onCall({timeoutSeconds: 120}, async (request) => {
     const userData = userDoc.data() || {};
 
     // 2. Verifica accesso Premium/Trial lato server
-    const isPremium = userData.isPremium === true;
-    const trialEnd = userData.trialEnd ? new Date(userData.trialEnd) : null;
-    const isTrialActive = trialEnd && trialEnd > new Date();
-
-    if (!isPremium && !isTrialActive) {
-      throw new HttpsError(
-          "permission-denied",
-          "Funzione riservata agli utenti Premium.",
-      );
-    }
+    const {isPremium} = requireActiveAccess(userData);
 
     // 3. Verifica limite trial lato server
     const richiesteUsate = userData.richiesteAiUsate || 0;
@@ -87,16 +142,7 @@ exports.scanReceipt = onCall({timeoutSeconds: 120}, async (request) => {
     const userData = userDoc.data() || {};
 
     // 2. Verifica Premium / Trial
-    const isPremium = userData.isPremium === true;
-    const trialEnd = userData.trialEnd ? new Date(userData.trialEnd) : null;
-    const isTrialActive = trialEnd && trialEnd > new Date();
-
-    if (!isPremium && !isTrialActive) {
-      throw new HttpsError(
-          "permission-denied",
-          "Funzione riservata agli utenti Premium.",
-      );
-    }
+    const {isPremium} = requireActiveAccess(userData);
 
     // 3. Verifica limite scontrini trial
     const scontriniUsati = userData.scontriniUsati || 0;
@@ -243,6 +289,66 @@ exports.scanReceipt = onCall({timeoutSeconds: 120}, async (request) => {
     return parsedData;
   } catch (error) {
     console.error("ERRORE SCAN RECEIPT:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", error.message);
+  }
+});
+
+// --- AI PREMIUM PROATTIVA (Blocco 2 del piano): FUNZIONE CONDIVISA ---
+//
+// Un'unica Cloud Function per tutti gli insight narrativi generati da
+// Gemini (mai per calcoli/somme, solo per la frase finale), selezionati
+// con "kind". In questo blocco è cablato solo un kind di prova
+// ("test_echo") per validare l'infrastruttura end-to-end: gating
+// Premium/Trial, quota condivisa analisiAvanzateUsate, chiamata Gemini,
+// incremento del contatore solo dopo una risposta riuscita. I kind reali
+// verranno aggiunti uno per blocco successivo:
+//   - "daily_tip" / "monthly_report" (Blocco 4): la function aggrega i
+//     dati lato server (Admin SDK) e scrive il risultato in cache su
+//     users/{uid} (aiDailyTip / aiMonthlyReport).
+//   - "habit_analysis" (Blocco 5), "family_analysis" (Blocco 8): ricevono
+//     un summary già compatto costruito lato client, come chatWithAssistant.
+
+exports.generateAiInsight = onCall({timeoutSeconds: 120}, async (request) => {
+  try {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Devi essere autenticato.");
+    }
+    const userId = request.auth.uid;
+    const userRef = db.collection("users").doc(userId);
+    const userDoc = await userRef.get();
+    const userData = userDoc.data() || {};
+
+    // 1. Accesso Premium/Trial e quota condivisa, prima di spendere nulla.
+    const {isPremium} = requireActiveAccess(userData);
+    requireAnalisiQuotaAvailable(userData, isPremium);
+
+    // 2. Solo il kind di prova è supportato in questo blocco.
+    const kind = request.data.kind;
+    if (kind !== "test_echo") {
+      throw new HttpsError(
+          "invalid-argument",
+          `Tipo di insight non supportato in questo blocco: "${kind}".`,
+      );
+    }
+    const summary = typeof request.data.summary === "string" ?
+      request.data.summary : "";
+
+    const model = genAI.getGenerativeModel({model: "gemini-3.5-flash-lite"});
+    const prompt = "Sei un consulente di budget personale. In una sola " +
+      "frase breve in italiano, conferma di aver ricevuto questo " +
+      `riepilogo e ripeti il numero principale che contiene: ${summary}`;
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
+
+    // 3. Aggiorna il contatore condiviso SOLO dopo una risposta riuscita.
+    await incrementAnalisiQuota(userRef);
+
+    return {kind, text};
+  } catch (error) {
+    console.error("ERRORE GENERATE AI INSIGHT:", error);
     if (error instanceof HttpsError) {
       throw error;
     }
