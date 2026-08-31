@@ -42,7 +42,15 @@ class BillingService {
   /// volta (es. in `initState` della schermata Premium) e la subscription va
   /// chiusa con [dispose]. [onResult] viene invocato per ogni acquisto
   /// completato o fallito, dopo la verifica server-side.
+  ///
+  /// No-op su Web: `in_app_purchase` non registra nessuna implementazione
+  /// della piattaforma lì, quindi anche solo leggere `purchaseStream` senza
+  /// questo guard lancia un `LateInitializationError` (visto risolvendo un
+  /// crash reale: si presentava aprendo Scanner scontrino o AI Chat da
+  /// utente Free, perché entrambi rimandano a `PremiumScreen` quando manca
+  /// l'accesso, e il suo `initState` chiamava `listen()` incondizionatamente).
   void listen({required void Function(PurchaseUpdateResult) onResult}) {
+    if (kIsWeb) return;
     _subscription?.cancel();
     _subscription = _iap.purchaseStream.listen(
       (purchases) => _handlePurchaseUpdates(purchases, onResult),
