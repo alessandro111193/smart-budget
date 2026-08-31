@@ -40,6 +40,12 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
   List<Map<String, dynamic>> _products = [];
   String? _error;
 
+  /// Media storica di spesa per categoria (solo Dart/Firestore, zero
+  /// costo AI): calcolata dopo lo scan per confrontarla con il totale di
+  /// questo scontrino, categoria per categoria. Non tocca in alcun modo
+  /// la conferma manuale già esistente.
+  Map<String, double> _historicalAverageByCategory = {};
+
   bool get _needsReceipt =>
       _mode == _PhotoMode.receiptOnly || _mode == _PhotoMode.both;
   bool get _needsProducts =>
@@ -128,7 +134,12 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
         await _createEnvelopesForProducts(products);
       }
 
-      setState(() => _products = products);
+      final historicalAverages = await _computeHistoricalAverages(products);
+
+      setState(() {
+        _products = products;
+        _historicalAverageByCategory = historicalAverages;
+      });
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -171,6 +182,32 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
     for (final p in products) {
       p['envelopeId'] = newIds[p['categoria']];
     }
+  }
+
+  /// Punto 11 del piano AI Premium: confronta il totale di questo
+  /// scontrino, categoria per categoria, con la media storica delle spese
+  /// già registrate in quella categoria. Solo Dart/Firestore, zero
+  /// chiamate AI — non cambia in nulla il flusso di conferma manuale.
+  Future<Map<String, double>> _computeHistoricalAverages(
+    List<Map<String, dynamic>> products,
+  ) async {
+    final scannedCategories = products
+        .map((p) => p['categoria'] as String)
+        .toSet();
+    if (scannedCategories.isEmpty) return {};
+
+    final pastExpenses = await _firestoreService.streamExpenses().first;
+    final sums = <String, double>{};
+    final counts = <String, int>{};
+    for (final e in pastExpenses) {
+      if (!scannedCategories.contains(e.category)) continue;
+      sums[e.category] = (sums[e.category] ?? 0) + e.amount;
+      counts[e.category] = (counts[e.category] ?? 0) + 1;
+    }
+
+    return {
+      for (final category in sums.keys) category: sums[category]! / counts[category]!,
+    };
   }
 
   @override
@@ -229,6 +266,7 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
             if (_error != null)
               Text(_error!, style: const TextStyle(color: AppColors.danger)),
             if (_products.isNotEmpty) ...[
+              _historicalComparisonCard(),
               const Text(
                 'Controlla e correggi prima di salvare:',
                 style: TextStyle(fontWeight: FontWeight.bold),
@@ -295,6 +333,7 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
         setState(() {
           _mode = selection.first;
           _products = [];
+          _historicalAverageByCategory = {};
           _error = null;
         });
       },
@@ -307,6 +346,63 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
+      ),
+    );
+  }
+
+  /// Card "confronto con lo storico" (punto 11): mostra il totale di
+  /// questo scontrino per ogni categoria già presente nello storico spese,
+  /// affiancato alla media storica di quella categoria. Solo informativa —
+  /// non blocca né modifica in alcun modo il salvataggio.
+  Widget _historicalComparisonCard() {
+    if (_historicalAverageByCategory.isEmpty) return const SizedBox.shrink();
+
+    final scannedTotals = <String, double>{};
+    for (final p in _products) {
+      final categoria = p['categoria'] as String;
+      final prezzo = (p['prezzo'] as double?) ?? 0;
+      final quantita = (p['quantita'] as int?) ?? 1;
+      scannedTotals[categoria] =
+          (scannedTotals[categoria] ?? 0) + prezzo * quantita;
+    }
+
+    final categories = _historicalAverageByCategory.keys
+        .where((c) => (scannedTotals[c] ?? 0) > 0)
+        .toList();
+    if (categories.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Confronto con lo storico',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+          ),
+          const SizedBox(height: 6),
+          ...categories.map((category) {
+            final total = scannedTotals[category]!;
+            final average = _historicalAverageByCategory[category]!;
+            final isHigher = total > average * 1.2;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                '$category: questo scontrino €${total.toStringAsFixed(2)} '
+                '(media storica €${average.toStringAsFixed(2)})',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isHigher ? AppColors.warning : AppColors.neutral,
+                ),
+              ),
+            );
+          }),
+        ],
       ),
     );
   }
