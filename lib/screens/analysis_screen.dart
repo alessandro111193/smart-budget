@@ -3,6 +3,9 @@ import 'package:fl_chart/fl_chart.dart';
 
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
+import '../services/ai_service.dart';
+import '../services/habit_insights.dart';
+import '../models/app_user.dart';
 import '../models/expense.dart';
 import '../models/envelope.dart';
 
@@ -243,6 +246,8 @@ class AnalysisScreen extends StatelessWidget {
                           'La busta "${env.name}" rischia di esaurirsi prima della fine del mese al ritmo attuale.',
                       color: AppColors.danger,
                     ),
+                  const SizedBox(height: 4),
+                  _HabitAnalysisCard(expenses: allExpenses),
                 ],
               );
             },
@@ -287,6 +292,158 @@ class AnalysisScreen extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Punti 3+5 del piano AI Premium: media mensile per categoria e
+/// variazioni recenti sono già calcolate in Dart (HabitInsights, zero
+/// costo); solo la narrazione finale — pattern rilevato + consiglio di
+/// risparmio — passa da Gemini, on-demand, mai da sola all'apertura
+/// schermo. Visibile solo a Premium/Trial.
+class _HabitAnalysisCard extends StatefulWidget {
+  const _HabitAnalysisCard({required this.expenses});
+
+  final List<Expense> expenses;
+
+  @override
+  State<_HabitAnalysisCard> createState() => _HabitAnalysisCardState();
+}
+
+class _HabitAnalysisCardState extends State<_HabitAnalysisCard> {
+  final _service = FirestoreService();
+  final _aiService = AiService();
+  bool _loading = false;
+  String? _result;
+  String? _error;
+
+  Future<void> _analyze() async {
+    final summary = HabitInsights.buildSummary(widget.expenses);
+    if (summary.isEmpty) {
+      setState(() {
+        _error = 'Continua a registrare le spese: mi servono almeno due '
+            'mesi di storico per un\'analisi affidabile.';
+      });
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final data = await _aiService.generateInsight(
+        kind: 'habit_analysis',
+        summary: summary,
+      );
+      if (!mounted) return;
+      setState(() {
+        _result = data['text'] as String? ?? '';
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString().replaceFirst('Exception: ', '');
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<AppUser>(
+      stream: _service.streamUser(),
+      builder: (context, snapshot) {
+        final hasAi = snapshot.data?.hasAiAccess ?? false;
+        if (!hasAi) return const SizedBox.shrink();
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const CircleAvatar(
+                    radius: 14,
+                    backgroundColor: AppColors.primary,
+                    child: Icon(
+                      Icons.smart_toy,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Analisi abitudini di spesa',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (_result != null) ...[
+                const SizedBox(height: 10),
+                Text(_result!, style: const TextStyle(fontSize: 13)),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  _error!,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.danger,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _loading ? null : _analyze,
+                  icon: _loading
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.primary,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.insights_outlined,
+                          size: 18,
+                          color: AppColors.primary,
+                        ),
+                  label: Text(
+                    _loading
+                        ? 'Sto analizzando...'
+                        : (_result == null
+                            ? 'Analizza le mie abitudini con l\'AI'
+                            : 'Rianalizza'),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    side: const BorderSide(color: AppColors.primary),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

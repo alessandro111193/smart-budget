@@ -307,8 +307,12 @@ exports.scanReceipt = onCall({timeoutSeconds: 120}, async (request) => {
 //     giorno/mese corrente è già valida, la restituisce senza richiamare
 //     Gemini né consumare quota — rigenerazione al massimo una volta al
 //     giorno/mese, come da piano.
-//   - "habit_analysis" (Blocco 5), "family_analysis" (Blocco 8): riceveranno
-//     un summary già compatto costruito lato client, come chatWithAssistant.
+//   - "habit_analysis" (Blocco 5): riceve un summary già compatto (medie
+//     mensili per categoria, variazioni recenti) costruito lato client
+//     con HabitInsights.buildSummary, come chatWithAssistant. On-demand,
+//     nessuna cache.
+//   - "family_analysis" (Blocco 8): riceverà anch'esso un summary
+//     compatto costruito lato client.
 
 /**
  * Aggrega, solo con letture Firestore (Admin SDK, nessuna chiamata AI), un
@@ -507,6 +511,48 @@ exports.generateAiInsight = onCall({timeoutSeconds: 120}, async (request) => {
       await incrementAnalisiQuota(userRef);
 
       return {kind, ...report, cached: false};
+    }
+
+    if (kind === "habit_analysis") {
+      // Blocco 5 del piano (punti 3+5): a differenza di daily_tip/
+      // monthly_report, qui il riepilogo (medie mensili per categoria,
+      // variazioni recenti già calcolate in Dart) arriva dal client, come
+      // per chatWithAssistant — non è un contenuto in cache, è on-demand.
+      requireAnalisiQuotaAvailable(userData, isPremium);
+      const summary = typeof request.data.summary === "string" ?
+        request.data.summary : "";
+      if (!summary) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Serve un riepilogo delle abitudini di spesa da analizzare.",
+        );
+      }
+
+      const model = genAI.getGenerativeModel({
+        model: "gemini-3.5-flash-lite",
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "object",
+            properties: {text: {type: "string"}},
+            required: ["text"],
+          },
+        },
+      });
+      const prompt = "Sei un consulente di budget personale. Basandoti " +
+        "SOLO sui dati reali forniti qui sotto (medie mensili e " +
+        "variazioni già calcolate, non inventare mai numeri), scrivi " +
+        "un'analisi breve in italiano (massimo 3-4 frasi): evidenzia un " +
+        "pattern o una variazione significativa nelle abitudini di " +
+        "spesa, poi concludi con un consiglio pratico e specifico per " +
+        `risparmiare. Tono amichevole, mai giudicante.\n${summary}`;
+      const result = await model.generateContent(prompt);
+      const parsed = JSON.parse(result.response.text());
+      const text = typeof parsed.text === "string" ? parsed.text : "";
+
+      await incrementAnalisiQuota(userRef);
+
+      return {kind, text};
     }
 
     throw new HttpsError(

@@ -116,14 +116,20 @@ class AiService {
     }
   }
 
-  /// Genera (o restituisce dalla cache lato server, se ancora valida per
-  /// oggi/questo mese) un insight AI proattivo: "daily_tip" o
-  /// "monthly_report". Non serve passare alcun riepilogo: per questi kind
-  /// la Cloud Function aggrega i dati direttamente da Firestore.
-  Future<Map<String, dynamic>> generateInsight({required String kind}) async {
+  /// Genera un insight AI. Per "daily_tip"/"monthly_report" non serve
+  /// passare [summary]: la Cloud Function aggrega i dati da Firestore e
+  /// restituisce dalla cache se ancora valida per oggi/questo mese. Per
+  /// "habit_analysis" [summary] è obbligatorio (riepilogo già compatto
+  /// costruito lato client, es. con HabitInsights.buildSummary).
+  Future<Map<String, dynamic>> generateInsight({
+    required String kind,
+    String? summary,
+  }) async {
     final callable = _functions.httpsCallable('generateAiInsight');
     try {
-      final result = await callable.call({'kind': kind});
+      final payload = <String, dynamic>{'kind': kind};
+      if (summary != null) payload['summary'] = summary;
+      final result = await callable.call(payload);
       return Map<String, dynamic>.from(result.data as Map);
     } on FirebaseFunctionsException catch (e) {
       if (e.code == 'resource-exhausted') {
