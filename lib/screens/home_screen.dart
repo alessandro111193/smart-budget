@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
+import '../services/budget_insights.dart';
 import '../models/envelope.dart';
 import '../models/expense.dart';
 import '../models/income.dart';
@@ -119,7 +120,9 @@ class _HomeScreenState extends State<HomeScreen> {
               _envelopesHeader(context),
               const SizedBox(height: 8),
               ...envelopes.take(4).map((e) => _envelopeTile(e)),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
+              _budgetAlertsCard(envelopes),
+              const SizedBox(height: 8),
               _aiInsightCard(context),
             ],
           ),
@@ -488,6 +491,74 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Avvisi solo Dart/Firestore (nessuna chiamata AI): esaurimento busta,
+  /// soglia di utilizzo alta, proiezione di fine mese al ritmo attuale.
+  /// Disponibili anche su Free, a differenza della card AI sotto.
+  Widget _budgetAlertsCard(List<Envelope> envelopes) {
+    if (envelopes.isEmpty) return const SizedBox.shrink();
+    return StreamBuilder<List<Expense>>(
+      stream: _service.streamExpenses(),
+      builder: (context, snapshot) {
+        final expenses = snapshot.data ?? [];
+        final alerts = BudgetInsights.compute(
+          envelopes: envelopes,
+          expenses: expenses,
+        );
+        if (alerts.isEmpty) return const SizedBox.shrink();
+        final shown = alerts.take(3).toList();
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Avvisi budget',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+              ...shown.map((a) {
+                final isDanger = a.severity == BudgetAlertSeverity.danger;
+                final color = isDanger ? AppColors.danger : AppColors.warning;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CircleAvatar(
+                        radius: 10,
+                        backgroundColor: color.withOpacity(0.15),
+                        child: Icon(
+                          isDanger
+                              ? Icons.error_outline
+                              : Icons.warning_amber_rounded,
+                          size: 12,
+                          color: color,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          a.message,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
+        );
+      },
     );
   }
 

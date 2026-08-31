@@ -30,9 +30,24 @@ App Flutter + Firebase di gestione budget familiare basata su "cash stuffing dig
 
 **Sicurezza:** Firestore Rules per utenti e famiglie; Cloud Functions con verifica auth + Premium/Trial server-side; chiavi solo in `functions/.env`; `main.dart` con emulatori solo in debug. Lo stato della lista della spesa (`shoppingListChecked`, `shoppingListManualItems`) è salvato sul documento utente esistente proprio per restare coperto dalle regole già in vigore, senza doverle allargare.
 
+**AI Premium — consulente personale (in corso, piano approvato, si procede a blocchi):** vedi la roadmap sotto per l'elenco completo. Blocco 1 completato: `lib/services/budget_insights.dart` calcola avvisi di budget solo con regole/statistiche (busta esaurita, ≥85% di utilizzo, proiezione di fine mese al ritmo di spesa attuale) — zero chiamate AI, disponibili anche su Free, mostrati in una card su `home_screen.dart` (`_budgetAlertsCard`) solo quando ci sono avvisi da mostrare.
+
 **Cloud Functions attive:** `chatWithAssistant`, `scanReceipt` (accetta `receiptImageBase64` e/o `productsImageBase64`, con `imageBase64` ancora supportato per compatibilità), `inviteFamilyMember`, `acceptFamilyInvite` — tutte con controllo auth + limiti trial. `verifyPlayPurchase` è scritta ma non operativa finché non è configurata su Play Console (vedi roadmap).
 
 ## Roadmap ancora da fare (in ordine)
+
+0. **AI Premium — consulente personale di spesa intelligente**, in blocchi sequenziali (piano approvato):
+   1. ~~Alert proattivi su buste/budget~~ — **fatto** (`budget_insights.dart`, Dart/Firestore, zero costo, anche Free).
+   2. Infrastruttura AI Premium condivisa: helper server-side `requireActiveAccess`/`checkAndConsumeAnalisiQuota` in `functions/index.js` (attiva il contatore `analisiAvanzateUsate`/`trialMaxAnalisi` già presente in `AppUser` ma mai usato), nuova Cloud Function `generateAiInsight`.
+   3. Distribuzione entrate assistita (nuova function `suggestIncomeDistribution`, output strutturato, mai applicata senza conferma dell'utente — bottone "Applica distribuzione").
+   4. Contenuti AI proattivi con cache: "Consiglio del giorno" (Home Premium) e "Il mio mese secondo l'AI" — campi `aiDailyTip`/`aiMonthlyReport` su `users/{uid}`, rigenerati al massimo una volta al giorno/mese, zero modifiche a `firestore.rules`.
+   5. Analisi abitudini e consigli di risparmio narrati (trend/scostamenti in Dart, narrazione via `generateAiInsight`).
+   6. Obiettivi intelligenti — la quota mensile e il check "on track" sono già implementati in `Challenge.monthlyQuota` (usato anche dai Sinking Funds); resta solo da valutare, a bassa priorità, il parsing di un obiettivo scritto in linguaggio naturale.
+   7. Scanner scontrino: confronto con la media storica di categoria dopo lo scan (Dart/Firestore, non tocca la conferma manuale esistente).
+   8. Insight famiglia (confronto mese su mese via Dart, narrazione opzionale, mai giudizi sulle persone).
+   9. Lista della spesa assistita da budget + arricchimento del contesto passato alla chat — priorità più bassa.
+
+   Piano completo con la tabella di classificazione Dart/Firestore vs Gemini per ogni punto: `/home/alessandro/.claude/plans/binary-soaring-blanket.md`.
 
 1. **Fase 6a — Google Play Billing (plumbing pronto, in attesa di configurazione Play Console):** codice client (`lib/services/billing_service.dart`, integrato in `premium_screen.dart`) e Cloud Function di verifica server-side (`verifyPlayPurchase` in `functions/index.js`) già scritti, ma **non testabili né utilizzabili finché non fai tu, sul tuo account Google Play Console:**
    - decidere l'`applicationId` Android definitivo (oggi è ancora il placeholder `com.example.smart_budget` in `android/app/build.gradle.kts` — non l'ho toccato perché legarlo a un valore diverso è una scelta solo tua, e va coordinato con l'app Android già registrata su Firebase);
