@@ -746,6 +746,118 @@ exports.suggestIncomeDistribution = onCall(
     },
 );
 
+// --- AI PREMIUM PROATTIVA (Blocco 9 del piano): LISTA SPESA CON BUDGET ---
+//
+// Punto 10a: "Devo fare la spesa con €80" -> l'AI propone una lista. Come
+// suggestIncomeDistribution, serve output STRUTTURATO (elenco di articoli
+// con prezzo stimato), non prosa, perché il client li aggiunge come voci
+// alla lista della spesa solo dopo conferma esplicita — mai in automatico.
+
+exports.suggestShoppingList = onCall(
+    {timeoutSeconds: 120},
+    async (request) => {
+      try {
+        if (!request.auth) {
+          throw new HttpsError("unauthenticated", "Devi essere autenticato.");
+        }
+        const userId = request.auth.uid;
+        const userRef = db.collection("users").doc(userId);
+        const userDoc = await userRef.get();
+        const userData = userDoc.data() || {};
+
+        const {isPremium} = requireActiveAccess(userData);
+        requireAnalisiQuotaAvailable(userData, isPremium);
+
+        const budget = Number(request.data.budget);
+        const summary = typeof request.data.summary === "string" ?
+          request.data.summary : "";
+
+        if (!Number.isFinite(budget) || budget <= 0) {
+          throw new HttpsError(
+              "invalid-argument",
+              "budget deve essere un numero positivo.",
+          );
+        }
+
+        const model = genAI.getGenerativeModel({
+          model: "gemini-3.5-flash-lite",
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "object",
+              properties: {
+                articoli: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      nome: {type: "string"},
+                      prezzoStimato: {type: "number"},
+                    },
+                    required: ["nome", "prezzoStimato"],
+                  },
+                },
+                motivazione: {type: "string"},
+              },
+              required: ["articoli", "motivazione"],
+            },
+          },
+        });
+
+        const prompt = "Sei un assistente per la spesa. L'utente ha un " +
+          `budget di €${budget.toFixed(2)}. Basandoti SOLO sui prodotti ` +
+          "che compra abitualmente e sui loro prezzi medi storici " +
+          "forniti qui sotto, proponi una lista della spesa che rispetti " +
+          "il budget indicato. Per i prodotti elencati nello storico usa " +
+          "ESATTAMENTE il prezzo medio fornito, senza mai modificarlo: " +
+          "se non entra nel budget, escludi quel prodotto invece di " +
+          "cambiarne il prezzo. Dai sempre priorità ai prodotti abituali " +
+          "dell'utente; puoi aggiungere al massimo un paio di prodotti " +
+          "base non presenti nello storico solo se necessario per una " +
+          "spesa sensata, stimandone un prezzo plausibile. La somma di " +
+          "tutti i \"prezzoStimato\" non deve superare il budget. " +
+          "Aggiungi \"motivazione\": una sola frase breve in italiano " +
+          `che spieghi la scelta.\n${summary}`;
+
+        const result = await model.generateContent(prompt);
+        const parsed = JSON.parse(result.response.text());
+
+        // Normalizza lato server: se il modello sfora comunque il budget,
+        // togli articoli dalla fine finché il totale non rientra (non ha
+        // senso "scalare" i prezzi di una lista della spesa come per un
+        // importo di denaro).
+        const rawArticoli = Array.isArray(parsed.articoli) ?
+          parsed.articoli : [];
+        const cleaned = rawArticoli.filter(
+            (a) => a && typeof a.nome === "string" && a.nome &&
+            Number.isFinite(a.prezzoStimato) && a.prezzoStimato > 0,
+        );
+        const articoli = [];
+        let total = 0;
+        for (const a of cleaned) {
+          if (total + a.prezzoStimato > budget) continue;
+          articoli.push({nome: a.nome, prezzoStimato: a.prezzoStimato});
+          total += a.prezzoStimato;
+        }
+
+        await incrementAnalisiQuota(userRef);
+
+        return {
+          articoli,
+          totaleStimato: Math.round(total * 100) / 100,
+          motivazione: typeof parsed.motivazione === "string" ?
+            parsed.motivazione : "",
+        };
+      } catch (error) {
+        console.error("ERRORE SUGGEST SHOPPING LIST:", error);
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+        throw new HttpsError("internal", error.message);
+      }
+    },
+);
+
 // --- FASE 4: FUNZIONI PER GESTIONE INVITI FAMIGLIA ---
 
 exports.inviteFamilyMember = onCall(async (request) => {

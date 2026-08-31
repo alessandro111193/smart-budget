@@ -143,6 +143,52 @@ class AiService {
       throw Exception('Errore imprevisto durante la generazione.');
     }
   }
+
+  /// Chiede all'AI una lista della spesa che rispetti un budget, basata
+  /// sui prodotti abituali dell'utente. Restituisce solo un suggerimento:
+  /// il chiamante deve sempre farlo confermare esplicitamente prima di
+  /// aggiungere gli articoli alla lista della spesa vera.
+  Future<ShoppingListSuggestion> suggestShoppingList({
+    required double budget,
+    required String summary,
+  }) async {
+    final callable = _functions.httpsCallable('suggestShoppingList');
+    try {
+      final result = await callable.call({
+        'budget': budget,
+        'summary': summary,
+      });
+      final data = Map<String, dynamic>.from(result.data as Map);
+      final articoli = List<Map<String, dynamic>>.from(
+        data['articoli'] ?? [],
+      );
+      return ShoppingListSuggestion(
+        motivazione: data['motivazione'] as String? ?? '',
+        totaleStimato: (data['totaleStimato'] as num?)?.toDouble() ?? 0,
+        items: [
+          for (final a in articoli)
+            (
+              nome: a['nome'] as String,
+              prezzoStimato: (a['prezzoStimato'] as num).toDouble(),
+            ),
+        ],
+      );
+    } on FirebaseFunctionsException catch (e) {
+      if (e.code == 'resource-exhausted') {
+        throw Exception('Hai raggiunto il limite di analisi AI del trial.');
+      }
+      if (e.code == 'permission-denied') {
+        throw Exception('Questa funzione richiede Premium.');
+      }
+      throw Exception(
+        'Errore nel calcolo della lista della spesa: ${e.message}',
+      );
+    } catch (e) {
+      throw Exception(
+        'Errore imprevisto durante il calcolo della lista della spesa.',
+      );
+    }
+  }
 }
 
 /// Risultato di [AiService.suggestIncomeDistribution]: quanto assegnare a
@@ -154,5 +200,18 @@ class IncomeDistributionSuggestion {
   IncomeDistributionSuggestion({
     required this.motivazione,
     required this.allocations,
+  });
+}
+
+/// Risultato di [AiService.suggestShoppingList].
+class ShoppingListSuggestion {
+  final String motivazione;
+  final double totaleStimato;
+  final List<({String nome, double prezzoStimato})> items;
+
+  ShoppingListSuggestion({
+    required this.motivazione,
+    required this.totaleStimato,
+    required this.items,
   });
 }

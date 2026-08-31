@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../models/challenge.dart';
 import '../services/ai_service.dart';
 import '../services/firestore_service.dart';
+import '../services/habit_insights.dart';
 
 class ChatMessage {
   final String text;
@@ -63,6 +64,12 @@ class _AiChatScreenState extends State<AiChatScreen> {
   /// Riassunto compatto (pochi numeri aggregati, mai transazioni singole né
   /// dati familiari) da passare a `chatWithAssistant`: tiene bassi i token
   /// e quindi il costo per richiesta, come da nota economica in CLAUDE.md.
+  ///
+  /// Punto 14 del piano AI Premium: arricchito con i segnali già calcolati
+  /// nei blocchi precedenti (trend/medie per categoria, stato "on track"
+  /// degli obiettivi) così la chat può rispondere a più tipi di domande
+  /// senza bisogno di una nuova Cloud Function — sempre solo numeri già
+  /// calcolati in Dart, mai nuovi calcoli delegati a Gemini.
   Future<String> _buildSpendingSummary() async {
     final now = DateTime.now();
     final expenses = await _firestoreService.streamExpenses().first;
@@ -104,10 +111,19 @@ class _AiChatScreenState extends State<AiChatScreen> {
           c.monthlyQuota != null,
     );
     for (final goal in activeGoals) {
+      final onTrack = goal.isOnTrack;
+      final onTrackText = onTrack == null
+          ? ''
+          : (onTrack ? ' (in linea con il piano)' : ' (indietro sul piano)');
       buffer.writeln(
         'Obiettivo di risparmio "${goal.title}": quota mensile consigliata '
-        '€${goal.monthlyQuota!.toStringAsFixed(2)}.',
+        '€${goal.monthlyQuota!.toStringAsFixed(2)}$onTrackText.',
       );
+    }
+
+    final habitSummary = HabitInsights.buildSummary(expenses, now: now);
+    if (habitSummary.isNotEmpty) {
+      buffer.writeln(habitSummary);
     }
 
     return buffer.toString().trim();
