@@ -32,14 +32,15 @@ class FirestoreService {
     );
   }
 
-  Future<void> addEnvelope(Envelope e) {
-    return _envelopes.add({
+  Future<String> addEnvelope(Envelope e) async {
+    final doc = await _envelopes.add({
       'name': e.name,
       'category': e.category,
       'budget': e.budget,
       'balance': e.balance,
       'icon': e.icon,
     });
+    return doc.id;
   }
 
   Future<void> updateEnvelopeBalance(String envelopeId, double newBalance) {
@@ -103,31 +104,13 @@ class FirestoreService {
 
   Stream<List<Challenge>> streamChallenges() {
     return _challenges.snapshots().map(
-      (snapshot) => snapshot.docs
-          .map(
-            (doc) => Challenge(
-              id: doc.id,
-              title: doc['title'],
-              type: ChallengeType.values[doc['type']],
-              targetAmount: (doc['targetAmount'] as num).toDouble(),
-              savedAmount: (doc['savedAmount'] as num).toDouble(),
-              deadline: doc['deadline'] != null
-                  ? DateTime.parse(doc['deadline'])
-                  : null,
-            ),
-          )
-          .toList(),
+      (snapshot) =>
+          snapshot.docs.map((doc) => Challenge.fromFirestore(doc)).toList(),
     );
   }
 
   Future<void> addChallenge(Challenge c) {
-    return _challenges.add({
-      'title': c.title,
-      'type': c.type.index,
-      'targetAmount': c.targetAmount,
-      'savedAmount': c.savedAmount,
-      'deadline': c.deadline?.toIso8601String(),
-    });
+    return _challenges.add(c.toMap());
   }
 
   Future<void> addToChallenge(String challengeId, double amount) async {
@@ -200,13 +183,13 @@ class FirestoreService {
   Future<void> addIncome({
     required String description,
     required double amount,
-    required String category, // Parametro categoria aggiunto
+    required String category,
     required Map<String, double> allocations,
   }) async {
     await _db.collection('users').doc(userId).collection('incomes').add({
       'description': description,
       'amount': amount,
-      'category': category, // Salvato correttamente su Firestore
+      'category': category,
       'date': DateTime.now().toIso8601String(),
       'allocations': allocations,
     });
@@ -220,4 +203,51 @@ class FirestoreService {
       }
     }
   }
+
+  // Stato della lista della spesa intelligente. Salvato sul documento
+  // utente esistente (già coperto dalle Firestore Rules attuali) invece
+  // di una nuova sottocollezione, per non dover modificare le regole.
+  Stream<ShoppingListState> streamShoppingListState() {
+    return _userDoc.snapshots().map((doc) {
+      final data = doc.data() as Map<String, dynamic>? ?? {};
+      return ShoppingListState(
+        checked: List<String>.from(data['shoppingListChecked'] ?? []),
+        manualItems: List<String>.from(data['shoppingListManualItems'] ?? []),
+      );
+    });
+  }
+
+  Future<void> setShoppingListItemChecked(String key, bool checked) {
+    return _userDoc.set({
+      'shoppingListChecked': checked
+          ? FieldValue.arrayUnion([key])
+          : FieldValue.arrayRemove([key]),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> addManualShoppingItem(String name) {
+    return _userDoc.set({
+      'shoppingListManualItems': FieldValue.arrayUnion([name]),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> removeManualShoppingItem(String name) {
+    return _userDoc.set({
+      'shoppingListManualItems': FieldValue.arrayRemove([name]),
+      'shoppingListChecked': FieldValue.arrayRemove([name]),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> clearShoppingListChecks() {
+    return _userDoc.set({
+      'shoppingListChecked': <String>[],
+    }, SetOptions(merge: true));
+  }
+}
+
+class ShoppingListState {
+  final List<String> checked;
+  final List<String> manualItems;
+
+  ShoppingListState({required this.checked, required this.manualItems});
 }

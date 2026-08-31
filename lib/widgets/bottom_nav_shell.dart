@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../screens/home_screen.dart';
 import '../screens/buste_screen.dart';
-import '../screens/new_expense_screen.dart';
+import '../screens/spese_screen.dart';
 import '../screens/analysis_screen.dart';
 import '../screens/ai_chat_screen.dart';
 import '../screens/premium_screen.dart';
@@ -26,7 +26,7 @@ class _BottomNavShellState extends State<BottomNavShell> {
     final screens = [
       HomeScreen(),
       const BusteScreen(),
-      const NewExpenseScreen(),
+      const SpeseScreen(),
       AnalysisScreen(),
       StreamBuilder<AppUser>(
         stream: _service.streamUser(),

@@ -2,52 +2,106 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 import '../models/challenge.dart';
+import '../models/envelope.dart';
 import '../services/firestore_service.dart';
 
 class ChallengeScreen extends StatelessWidget {
-  ChallengeScreen({super.key});
+  const ChallengeScreen({super.key});
 
-  final _service = FirestoreService();
+  static final _service = FirestoreService();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Challenge')),
+      appBar: AppBar(title: const Text('Challenge & Sinking Funds')),
       floatingActionButton: FloatingActionButton(
         backgroundColor: AppColors.primary,
         onPressed: () => _showNewChallengeSheet(context),
         child: const Icon(Icons.add),
       ),
-      body: StreamBuilder<List<Challenge>>(
-        stream: _service.streamChallenges(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final challenges = snapshot.data!;
-          if (challenges.isEmpty) {
-            return const Center(
-              child: Text(
-                'Nessuna challenge ancora. Creane una col pulsante +',
-              ),
-            );
-          }
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: challenges
-                .map((c) => _buildChallengeCard(context, c))
-                .toList(),
+      body: StreamBuilder<List<Envelope>>(
+        stream: _service.streamEnvelopes(),
+        builder: (context, envSnapshot) {
+          final envelopes = envSnapshot.data ?? [];
+
+          return StreamBuilder<List<Challenge>>(
+            stream: _service.streamChallenges(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final challenges = snapshot.data!;
+              if (challenges.isEmpty) {
+                return const Center(
+                  child: Text(
+                    'Nessuna challenge ancora. Creane una col pulsante +',
+                  ),
+                );
+              }
+
+              final sinkingFunds = challenges
+                  .where((c) => c.envelopeId != null)
+                  .toList();
+              final genericChallenges = challenges
+                  .where((c) => c.envelopeId == null)
+                  .toList();
+
+              return ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  if (sinkingFunds.isNotEmpty) ...[
+                    const Text(
+                      'Sinking Funds (Buste per Obiettivi)',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...sinkingFunds.map(
+                      (c) => _buildChallengeCard(context, c, envelopes),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  if (genericChallenges.isNotEmpty) ...[
+                    const Text(
+                      'Obiettivi Generici & Tetti di Spesa',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...genericChallenges.map(
+                      (c) => _buildChallengeCard(context, c, envelopes),
+                    ),
+                  ],
+                ],
+              );
+            },
           );
         },
       ),
     );
   }
 
-  Widget _buildChallengeCard(BuildContext context, Challenge c) {
+  Widget _buildChallengeCard(
+    BuildContext context,
+    Challenge c,
+    List<Envelope> envelopes,
+  ) {
     final isSaving = c.type == ChallengeType.saving;
     final progressColor = c.limitExceeded
         ? AppColors.danger
         : AppColors.primary;
+
+    Envelope? linkedEnvelope;
+    if (c.envelopeId != null) {
+      linkedEnvelope = envelopes.cast<Envelope?>().firstWhere(
+        (e) => e?.id == c.envelopeId,
+        orElse: () => null,
+      );
+    }
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -81,6 +135,26 @@ class ChallengeScreen extends StatelessWidget {
                   ),
               ],
             ),
+            if (linkedEnvelope != null) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Text(
+                    linkedEnvelope.icon,
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Busta collegata: ${linkedEnvelope.name}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade700,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 8),
             LinearProgressIndicator(
               value: c.percentComplete.clamp(0, 1),
@@ -96,7 +170,7 @@ class ChallengeScreen extends StatelessWidget {
             ),
             if (isSaving && c.monthlyQuota != null)
               Text(
-                'Quota mensile consigliata: \u20ac${c.monthlyQuota!.toStringAsFixed(2)}',
+                'Quota mensile consigliata: €${c.monthlyQuota!.toStringAsFixed(2)}',
                 style: const TextStyle(color: AppColors.neutral, fontSize: 12),
               ),
             if (c.limitExceeded)
@@ -159,102 +233,138 @@ class ChallengeScreen extends StatelessWidget {
     final targetController = TextEditingController();
     ChallengeType selectedType = ChallengeType.saving;
     DateTime? deadline;
+    String? selectedEnvelopeId;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                top: 16,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Nuova challenge',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        return StreamBuilder<List<Envelope>>(
+          stream: _service.streamEnvelopes(),
+          builder: (context, envSnapshot) {
+            final envelopes = envSnapshot.data ?? [];
+
+            return StatefulBuilder(
+              builder: (context, setState) {
+                return Padding(
+                  padding: EdgeInsets.only(
+                    left: 16,
+                    right: 16,
+                    top: 16,
+                    bottom: MediaQuery.of(context).viewInsets.bottom + 16,
                   ),
-                  const SizedBox(height: 12),
-                  DropdownButton<ChallengeType>(
-                    value: selectedType,
-                    isExpanded: true,
-                    items: const [
-                      DropdownMenuItem(
-                        value: ChallengeType.saving,
-                        child: Text('Obiettivo di risparmio'),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Nuova challenge',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                      DropdownMenuItem(
-                        value: ChallengeType.spendingLimit,
-                        child: Text('Tetto di spesa'),
+                      const SizedBox(height: 12),
+                      DropdownButton<ChallengeType>(
+                        value: selectedType,
+                        isExpanded: true,
+                        items: const [
+                          DropdownMenuItem(
+                            value: ChallengeType.saving,
+                            child: Text('Obiettivo di risparmio'),
+                          ),
+                          DropdownMenuItem(
+                            value: ChallengeType.spendingLimit,
+                            child: Text('Tetto di spesa'),
+                          ),
+                        ],
+                        onChanged: (v) => setState(() => selectedType = v!),
+                      ),
+                      TextField(
+                        controller: titleController,
+                        decoration: const InputDecoration(
+                          labelText: 'Nome challenge',
+                        ),
+                      ),
+                      TextField(
+                        controller: targetController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: selectedType == ChallengeType.saving
+                              ? 'Obiettivo da raggiungere (€)'
+                              : 'Tetto massimo di spesa (€)',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String?>(
+                        value: selectedEnvelopeId,
+                        decoration: const InputDecoration(
+                          labelText: 'Collega a una busta (opzionale)',
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('Nessuna busta (Obiettivo generico)'),
+                          ),
+                          ...envelopes.map(
+                            (e) => DropdownMenuItem<String?>(
+                              value: e.id,
+                              child: Text('${e.icon} ${e.name}'),
+                            ),
+                          ),
+                        ],
+                        onChanged: (val) =>
+                            setState(() => selectedEnvelopeId = val),
+                      ),
+                      if (selectedType == ChallengeType.saving)
+                        TextButton(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: DateTime.now().add(
+                                const Duration(days: 90),
+                              ),
+                              firstDate: DateTime.now(),
+                              lastDate: DateTime(2100),
+                            );
+                            if (picked != null) {
+                              setState(() => deadline = picked);
+                            }
+                          },
+                          child: Text(
+                            deadline == null
+                                ? 'Scegli scadenza (opzionale)'
+                                : 'Scadenza: ${deadline!.day}/${deadline!.month}/${deadline!.year}',
+                          ),
+                        ),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: () async {
+                          final target =
+                              double.tryParse(targetController.text) ?? 0;
+                          if (titleController.text.isEmpty || target <= 0)
+                            return;
+                          await _service.addChallenge(
+                            Challenge(
+                              id: '',
+                              title: titleController.text,
+                              type: selectedType,
+                              targetAmount: target,
+                              savedAmount: 0,
+                              deadline: selectedType == ChallengeType.saving
+                                  ? deadline
+                                  : null,
+                              envelopeId: selectedEnvelopeId,
+                            ),
+                          );
+                          if (context.mounted) Navigator.pop(context);
+                        },
+                        child: const Text('Crea challenge'),
                       ),
                     ],
-                    onChanged: (v) => setState(() => selectedType = v!),
                   ),
-                  TextField(
-                    controller: titleController,
-                    decoration: const InputDecoration(
-                      labelText: 'Nome challenge',
-                    ),
-                  ),
-                  TextField(
-                    controller: targetController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: selectedType == ChallengeType.saving
-                          ? 'Obiettivo da raggiungere (\u20ac)'
-                          : 'Tetto massimo di spesa (\u20ac)',
-                    ),
-                  ),
-                  if (selectedType == ChallengeType.saving)
-                    TextButton(
-                      onPressed: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: DateTime.now().add(
-                            const Duration(days: 90),
-                          ),
-                          firstDate: DateTime.now(),
-                          lastDate: DateTime(2100),
-                        );
-                        if (picked != null) setState(() => deadline = picked);
-                      },
-                      child: Text(
-                        deadline == null
-                            ? 'Scegli scadenza (opzionale)'
-                            : 'Scadenza: ${deadline!.day}/${deadline!.month}/${deadline!.year}',
-                      ),
-                    ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () async {
-                      final target =
-                          double.tryParse(targetController.text) ?? 0;
-                      if (titleController.text.isEmpty || target <= 0) return;
-                      await _service.addChallenge(
-                        Challenge(
-                          id: '',
-                          title: titleController.text,
-                          type: selectedType,
-                          targetAmount: target,
-                          savedAmount: 0,
-                          deadline: selectedType == ChallengeType.saving
-                              ? deadline
-                              : null,
-                        ),
-                      );
-                      if (context.mounted) Navigator.pop(context);
-                    },
-                    child: const Text('Crea challenge'),
-                  ),
-                ],
-              ),
+                );
+              },
             );
           },
         );

@@ -7,17 +7,30 @@ import '../models/expense.dart';
 import '../models/income.dart';
 import '../models/challenge.dart';
 import '../models/app_user.dart';
-import 'new_envelope_screen.dart';
 import 'new_expense_screen.dart';
 import 'new_income_screen.dart';
 import 'ai_chat_screen.dart';
 import 'premium_screen.dart';
 import 'buste_screen.dart';
+import 'analysis_screen.dart';
+import 'challenge_screen.dart';
+import 'family_screen.dart';
+import 'scan_receipt_screen.dart';
+import 'shopping_list_screen.dart';
 
-class HomeScreen extends StatelessWidget {
-  HomeScreen({super.key});
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
 
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
   final _service = FirestoreService();
+
+  void _refresh() {
+    setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,11 +60,33 @@ class HomeScreen extends StatelessWidget {
             elevation: 0,
             actions: [
               IconButton(
-                icon: const Icon(
-                  Icons.notifications_none,
-                  color: AppColors.ink,
-                ),
-                onPressed: () {},
+                icon: const Icon(Icons.people_outline, color: AppColors.ink),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => FamilyScreen()),
+                  );
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.bar_chart, color: AppColors.ink),
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => AnalysisScreen()),
+                  );
+                  _refresh();
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.flag_outlined, color: AppColors.ink),
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const ChallengeScreen()),
+                  );
+                  _refresh();
+                },
               ),
             ],
           ),
@@ -60,7 +95,6 @@ class HomeScreen extends StatelessWidget {
             children: [
               _greetingRow(),
               const SizedBox(height: 16),
-              // Le "Entrate" mostrate ora sono la somma reale dei tuoi Income
               StreamBuilder<List<Income>>(
                 stream: _service.streamIncomes(),
                 builder: (context, incSnapshot) {
@@ -265,65 +299,66 @@ class HomeScreen extends StatelessWidget {
             'Nuova\nentrata',
             Icons.add_circle_outline,
             AppColors.primary,
-            () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const NewIncomeScreen()),
-            ),
+            () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const NewIncomeScreen()),
+              );
+              _refresh();
+            },
           ),
           _ActionItem(
             'Aggiungi\nspesa',
             Icons.shopping_cart_outlined,
             AppColors.warning,
-            () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const NewExpenseScreen()),
-            ),
+            () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const NewExpenseScreen()),
+              );
+              _refresh();
+            },
           ),
           _ActionItem(
-            'Scanner\nscontrino',
-            Icons.camera_alt_outlined,
+            'Scan\nscontrino',
+            Icons.qr_code_scanner,
             AppColors.accent,
-            () => _goPremiumGated(context, hasAi, () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Scanner scontrino: prossima parte della guida',
-                  ),
-                ),
+            () => _goPremiumGated(context, hasAi, () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ScanReceiptScreen()),
               );
+              _refresh();
             }),
           ),
           _ActionItem(
             'AI\nAssistant',
             Icons.smart_toy_outlined,
             AppColors.secondary,
-            () => _goPremiumGated(
-              context,
-              hasAi,
-              () => Navigator.push(
+            () => _goPremiumGated(context, hasAi, () async {
+              await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const AiChatScreen()),
-              ),
-            ),
+              );
+              _refresh();
+            }),
           ),
           _ActionItem(
             'Lista\nspesa',
             Icons.list_alt_outlined,
-            AppColors.secondary,
-            () => _goPremiumGated(context, hasAi, () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Lista della spesa: prossima parte della guida',
-                  ),
-                ),
+            AppColors.neutral,
+            () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ShoppingListScreen()),
               );
-            }),
+              _refresh();
+            },
           ),
         ];
 
         return Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: actions.map((a) => _actionButton(a)).toList(),
         );
       },
@@ -379,10 +414,13 @@ class HomeScreen extends StatelessWidget {
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
         TextButton(
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const BusteScreen()),
-          ),
+          onPressed: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const BusteScreen()),
+            );
+            _refresh();
+          },
           child: const Text('Vedi tutte'),
         ),
       ],
@@ -494,13 +532,16 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     GestureDetector(
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              hasAi ? const AiChatScreen() : PremiumScreen(),
-                        ),
-                      ),
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                hasAi ? const AiChatScreen() : PremiumScreen(),
+                          ),
+                        );
+                        _refresh();
+                      },
                       child: Text(
                         hasAi ? 'Apri chat →' : 'Scopri come →',
                         style: const TextStyle(

@@ -1,0 +1,61 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      match /envelopes/{envelopeId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      match /expenses/{expenseId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      match /incomes/{incomeId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      match /challenges/{challengeId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    match /families/{familyId} {
+      function isMember() {
+        return request.auth != null &&
+          exists(/databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid));
+      }
+      function isOwner() {
+        return request.auth != null &&
+          get(/databases/$(database)/documents/families/$(familyId)).data.ownerId == request.auth.uid;
+      }
+
+      allow read: if isMember();
+      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isOwner();
+
+      match /members/{memberId} {
+        allow read: if isMember();
+        allow create: if isOwner() || request.auth.uid == memberId;
+        allow update, delete: if isOwner();
+      }
+
+      match /invites/{inviteId} {
+        allow read: if request.auth != null &&
+          (resource.data.email == request.auth.token.email || isOwner());
+        allow create: if isOwner();
+        allow update: if request.auth != null && resource.data.email == request.auth.token.email;
+        allow delete: if isOwner();
+      }
+
+      match /envelopes/{envelopeId} {
+        allow read, write: if isMember();
+      }
+      match /expenses/{expenseId} {
+        allow read, write: if isMember();
+      }
+      match /incomes/{incomeId} {
+        allow read, write: if isMember();
+      }
+    }
+  }
+}

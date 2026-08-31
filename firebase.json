@@ -5,7 +5,7 @@
         "default": {
           "projectId": "smart-budget-13198",
           "appId": "1:982110038457:android:7ee53d11544f5e363aae68",
-      "fileOutput": "android/app/google-services.json"
+          "fileOutput": "android/app/google-services.json"
         }
       },
       "dart": {
@@ -21,6 +21,10 @@
         }
       }
     }
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
   },
   "functions": [
     {
