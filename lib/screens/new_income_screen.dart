@@ -45,10 +45,37 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
     );
   }
 
+  static InputDecoration _fieldDecoration({
+    String? labelText,
+    String? prefixText,
+  }) {
+    return InputDecoration(
+      labelText: labelText,
+      prefixText: prefixText,
+      isDense: true,
+      filled: true,
+      fillColor: const Color(0xFFF8FAFC),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Nuova entrata')),
+      appBar: AppBar(
+        title: const Text(
+          'Nuova entrata',
+          style: TextStyle(color: AppColors.ink, fontSize: 17),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.ink),
+      ),
       body: StreamBuilder<List<Envelope>>(
         stream: _service.streamEnvelopes(),
         builder: (context, snapshot) {
@@ -76,12 +103,8 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                       children: [
                         // Scelta Categoria
                         DropdownButtonFormField<String>(
-                          value: _selectedCategory,
-                          decoration: const InputDecoration(
-                            labelText: 'Categoria',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
+                          initialValue: _selectedCategory,
+                          decoration: _fieldDecoration(labelText: 'Categoria'),
                           items: _categories.map((cat) {
                             return DropdownMenuItem(
                               value: cat,
@@ -98,10 +121,8 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                         // Campo Descrizione
                         TextField(
                           controller: _descriptionController,
-                          decoration: const InputDecoration(
+                          decoration: _fieldDecoration(
                             labelText: 'Descrizione (opzionale)',
-                            border: OutlineInputBorder(),
-                            isDense: true,
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -111,10 +132,8 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
                           ),
-                          decoration: const InputDecoration(
+                          decoration: _fieldDecoration(
                             labelText: 'Importo totale entrata (€)',
-                            border: OutlineInputBorder(),
-                            isDense: true,
                           ),
                           onChanged: (_) => setLocalState(() {}),
                         ),
@@ -128,23 +147,33 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                     ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('Assegnato: €${assigned.toStringAsFixed(2)}'),
-                        Text(
-                          'Da assegnare: €${remaining.toStringAsFixed(2)}',
-                          style: TextStyle(
-                            color: remaining < 0
-                                ? AppColors.danger
-                                : AppColors.warning,
-                            fontWeight: FontWeight.bold,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Assegnato: €${assigned.toStringAsFixed(2)}'),
+                          Text(
+                            'Da assegnare: €${remaining.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              color: remaining < 0
+                                  ? AppColors.danger
+                                  : AppColors.warning,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                  const Divider(),
+                  const SizedBox(height: 12),
                   Expanded(
                     child: ListView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -164,7 +193,7 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                                 ),
                               ),
                               SizedBox(
-                                width: 110,
+                                width: 120,
                                 child: TextField(
                                   controller: _allocationControllers[env.id],
                                   keyboardType:
@@ -172,10 +201,8 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                                         decimal: true,
                                       ),
                                   textAlign: TextAlign.right,
-                                  decoration: const InputDecoration(
+                                  decoration: _fieldDecoration(
                                     prefixText: '€ ',
-                                    border: OutlineInputBorder(),
-                                    isDense: true,
                                   ),
                                   onChanged: (_) => setLocalState(() {}),
                                 ),
@@ -193,6 +220,11 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
                         ),
                         onPressed: _totalIncome > 0
                             ? () async {
@@ -230,7 +262,7 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                             : null,
                         child: const Text(
                           'Registra e distribuisci entrata',
-                          style: TextStyle(color: Colors.white),
+                          style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
                     ),
