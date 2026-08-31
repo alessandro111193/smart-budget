@@ -103,8 +103,24 @@ exports.chatWithAssistant = onCall({timeoutSeconds: 120}, async (request) => {
     const summary = request.data.spendingSummary || "";
 
     const model = genAI.getGenerativeModel({model: "gemini-3.5-flash-lite"});
-    const prompt = `Sei un assistente di budget familiare.
-Rispondi in italiano, in modo breve e concreto.
+    const prompt = `Sei un assistente di budget familiare della app ` +
+      `"Spesa Intelligente". Rispondi sempre in italiano, in modo breve ` +
+      `e concreto.
+
+REGOLA FONDAMENTALE: non hai alcuna capacità di creare, modificare o ` +
+      `eliminare buste, spese, entrate, obiettivi o qualsiasi altro dato ` +
+      `dell'utente. Puoi SOLO leggere il riepilogo fornito qui sotto e ` +
+      `dare consigli o informazioni basati su di esso.
+Se l'utente ti chiede di eseguire un'azione (es. "crea una busta", ` +
+      `"registra una spesa", "sposta dei soldi", "cancella l'obiettivo"), ` +
+      `NON fingere MAI di averla eseguita: non inventare conferme, saldi ` +
+      `aggiornati o nuovi dati che non provengono dal riepilogo fornito. ` +
+      `Spiega chiaramente che non puoi farlo direttamente da qui e indica ` +
+      `in modo specifico dove/come può farlo da solo nell'app (es. ` +
+      `"Puoi creare una nuova busta dalla schermata Buste con il ` +
+      `pulsante +", "Puoi registrare questa spesa dalla schermata Spese ` +
+      `o scansionando lo scontrino").
+
 Dati di riepilogo dell'utente: ${summary}
 Domanda: ${question}`;
 
