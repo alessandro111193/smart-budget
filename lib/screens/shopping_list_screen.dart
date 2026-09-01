@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../models/app_user.dart';
 import '../services/ai_service.dart';
+import '../services/analytics_service.dart';
 import '../services/firestore_service.dart';
 import '../models/expense.dart';
 
@@ -48,6 +49,12 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
   String? _budgetError;
 
   static final _quantitySuffix = RegExp(r'\s*\(x\d+\)$', caseSensitive: false);
+
+  @override
+  void initState() {
+    super.initState();
+    AnalyticsService.logShoppingListUsed();
+  }
 
   @override
   void dispose() {

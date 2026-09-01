@@ -28,6 +28,24 @@ class Challenge {
     this.createdAt,
   });
 
+  /// Copia della challenge con un [savedAmount] diverso. Usata per i
+  /// Sinking Funds collegati a una busta: il saldo reale della busta
+  /// (Envelope.balance) diventa l'unica fonte di verità per il progresso —
+  /// niente più un contatore separato che può disallinearsi dal saldo
+  /// effettivo, come segnalato nel controllo di stato pre-beta.
+  Challenge copyWithSavedAmount(double savedAmount) {
+    return Challenge(
+      id: id,
+      title: title,
+      type: type,
+      targetAmount: targetAmount,
+      savedAmount: savedAmount,
+      deadline: deadline,
+      envelopeId: envelopeId,
+      createdAt: createdAt,
+    );
+  }
+
   /// Per "saving": quanto manca in percentuale verso l'obiettivo.
   /// Per "spendingLimit": quanto è già stato consumato del tetto di spesa.
   double get percentComplete =>

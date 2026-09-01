@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/income.dart';
@@ -6,6 +7,7 @@ import '../models/app_user.dart';
 import '../models/challenge.dart';
 import '../models/envelope.dart';
 import '../models/expense.dart';
+import 'analytics_service.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -40,32 +42,59 @@ class FirestoreService {
       'balance': e.balance,
       'icon': e.icon,
     });
+    AnalyticsService.logEnvelopeCreated(isFamily: false);
     return doc.id;
-  }
-
-  Future<void> updateEnvelopeBalance(String envelopeId, double newBalance) {
-    return _envelopes.doc(envelopeId).update({'balance': newBalance});
   }
 
   Future<void> deleteEnvelope(String envelopeId) {
     return _envelopes.doc(envelopeId).delete();
   }
 
+  /// Aggiorna nome/categoria/budget/icona di una busta esistente. [budget]
+  /// è il nuovo importo totale; il saldo disponibile viene spostato della
+  /// stessa differenza (budgetDelta = nuovo - vecchio) così che "quanto è
+  /// già stato speso" (budget - saldo) resti invariato dopo la modifica —
+  /// altrimenti aumentare il budget farebbe apparire come "spesa" la
+  /// differenza, e diminuirlo la farebbe sparire.
+  Future<void> updateEnvelope(
+    String envelopeId, {
+    required String name,
+    required String category,
+    required double budget,
+    required String icon,
+    required double budgetDelta,
+  }) {
+    return _envelopes.doc(envelopeId).update({
+      'name': name,
+      'category': category,
+      'budget': budget,
+      'icon': icon,
+      'balance': FieldValue.increment(budgetDelta),
+    });
+  }
+
   CollectionReference get _expenses =>
       _db.collection('users').doc(userId).collection('expenses');
 
+  /// Registra la spesa e scala il saldo busta in un'unica scrittura atomica
+  /// (batch con FieldValue.increment, nessuna lettura preventiva del saldo
+  /// necessaria): evita che due spese quasi simultanee sulla stessa busta
+  /// si "perdano" a vicenda, come già garantito lato famiglia da
+  /// FamilyService.addFamilyExpense.
   Future<void> addExpense(Expense exp) async {
-    await _expenses.add({
+    final batch = _db.batch();
+    batch.set(_expenses.doc(), {
       'amount': exp.amount,
       'category': exp.category,
       'envelopeId': exp.envelopeId,
       'description': exp.description,
       'date': exp.date.toIso8601String(),
     });
-
-    final envelopeDoc = await _envelopes.doc(exp.envelopeId).get();
-    final currentBalance = (envelopeDoc['balance'] as num).toDouble();
-    await updateEnvelopeBalance(exp.envelopeId, currentBalance - exp.amount);
+    batch.update(_envelopes.doc(exp.envelopeId), {
+      'balance': FieldValue.increment(-exp.amount),
+    });
+    await batch.commit();
+    AnalyticsService.logExpenseAdded(isFamily: false);
   }
 
   Stream<List<Income>> streamIncomes() {
@@ -113,11 +142,12 @@ class FirestoreService {
     return _challenges.add(c.toMap());
   }
 
-  Future<void> addToChallenge(String challengeId, double amount) async {
-    final doc = await _challenges.doc(challengeId).get();
-    final current = (doc['savedAmount'] as num).toDouble();
-    await _challenges.doc(challengeId).update({
-      'savedAmount': current + amount,
+  /// FieldValue.increment è atomico lato server: due contributi ravvicinati
+  /// alla stessa challenge (es. doppio tap, o due dispositivi) non si
+  /// perdono più a vicenda come con il precedente leggi-poi-scrivi.
+  Future<void> addToChallenge(String challengeId, double amount) {
+    return _challenges.doc(challengeId).update({
+      'savedAmount': FieldValue.increment(amount),
     });
   }
 
@@ -145,19 +175,19 @@ class FirestoreService {
         scontriniUsati: data['scontriniUsati'] ?? 0,
         richiesteAiUsate: data['richiesteAiUsate'] ?? 0,
         analisiAvanzateUsate: data['analisiAvanzateUsate'] ?? 0,
+        playPurchaseToken: data['playPurchaseToken'] as String?,
+        playProductId: data['playProductId'] as String?,
       );
     });
   }
 
-  Future<void> startTrial() {
-    final trialEnd = DateTime.now().add(const Duration(days: 15));
-    return _userDoc.set({
-      'isPremium': false,
-      'trialEnd': trialEnd.toIso8601String(),
-      'scontriniUsati': 0,
-      'richiesteAiUsate': 0,
-      'analisiAvanzateUsate': 0,
-    }, SetOptions(merge: true));
+  // isPremium/trialEnd/contatori non sono più scrivibili dal client
+  // (Firestore Rules): l'attivazione passa dalla Cloud Function startTrial,
+  // che scrive questi campi via Admin SDK con lo stesso comportamento di
+  // prima (15 giorni, contatori azzerati).
+  Future<void> startTrial() async {
+    await FirebaseFunctions.instance.httpsCallable('startTrial').call();
+    AnalyticsService.logTrialStarted();
   }
 
   double totalBudget(List<Envelope> envelopes) =>
@@ -169,39 +199,51 @@ class FirestoreService {
   double totalSpeso(List<Envelope> envelopes) =>
       totalBudget(envelopes) - totalDisponibile(envelopes);
 
+  /// Batch atomico con FieldValue.increment: nessuna lettura preventiva del
+  /// saldo, quindi nessun rischio che due distribuzioni quasi simultanee
+  /// sulla stessa busta si sovrascrivano a vicenda.
   Future<void> distributeIncome(
     Map<String, double> allocationByEnvelopeId,
   ) async {
-    for (final entry in allocationByEnvelopeId.entries) {
-      if (entry.value <= 0) continue;
-      final doc = await _envelopes.doc(entry.key).get();
-      final current = (doc['balance'] as num).toDouble();
-      await updateEnvelopeBalance(entry.key, current + entry.value);
+    final entries = allocationByEnvelopeId.entries.where((e) => e.value > 0);
+    if (entries.isEmpty) return;
+    final batch = _db.batch();
+    for (final entry in entries) {
+      batch.update(_envelopes.doc(entry.key), {
+        'balance': FieldValue.increment(entry.value),
+      });
     }
+    await batch.commit();
   }
 
+  /// Stesso motivo di [addExpense]/[distributeIncome]: la registrazione
+  /// dell'entrata e l'aggiornamento dei saldi busta sono un unico batch
+  /// atomico, mai più letture separate del saldo corrente.
   Future<void> addIncome({
     required String description,
     required double amount,
     required String category,
     required Map<String, double> allocations,
   }) async {
-    await _db.collection('users').doc(userId).collection('incomes').add({
-      'description': description,
-      'amount': amount,
-      'category': category,
-      'date': DateTime.now().toIso8601String(),
-      'allocations': allocations,
-    });
-
+    final batch = _db.batch();
+    batch.set(
+      _db.collection('users').doc(userId).collection('incomes').doc(),
+      {
+        'description': description,
+        'amount': amount,
+        'category': category,
+        'date': DateTime.now().toIso8601String(),
+        'allocations': allocations,
+      },
+    );
     for (final entry in allocations.entries) {
       if (entry.value <= 0) continue;
-      final doc = await _envelopes.doc(entry.key).get();
-      if (doc.exists) {
-        final current = (doc['balance'] as num).toDouble();
-        await updateEnvelopeBalance(entry.key, current + entry.value);
-      }
+      batch.update(_envelopes.doc(entry.key), {
+        'balance': FieldValue.increment(entry.value),
+      });
     }
+    await batch.commit();
+    AnalyticsService.logIncomeAdded(isFamily: false);
   }
 
   // Stato della lista della spesa intelligente. Salvato sul documento

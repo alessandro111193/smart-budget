@@ -4,6 +4,8 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:in_app_purchase/in_app_purchase.dart';
 
+import 'analytics_service.dart';
+
 /// ID del prodotto abbonamento in Google Play Console.
 ///
 /// TODO(play-console): sostituire con l'ID reale del prodotto subscription
@@ -80,6 +82,25 @@ class BillingService {
 
   Future<void> restorePurchases() => _iap.restorePurchases();
 
+  /// Ricontrolla lo stato reale su Google Play di un abbonamento già
+  /// verificato in passato, usando il token salvato da verifyPlayPurchase
+  /// sul documento utente — senza aspettare che lo store ripresenti un
+  /// evento spontaneo (in_app_purchase.restorePurchases() non è garantito
+  /// far riemettere un abbonamento ormai scaduto/cancellato, perché Play
+  /// potrebbe semplicemente non riproporlo come "restorable"). Chiamata
+  /// dalla schermata Premium ad ogni apertura se l'utente risulta già
+  /// Premium, così una cancellazione/scadenza viene rilevata al prossimo
+  /// accesso invece di restare bloccata sull'ultimo stato noto.
+  Future<PurchaseUpdateResult> reverifyStoredSubscription({
+    required String purchaseToken,
+    required String productId,
+  }) {
+    return _callVerifyPlayPurchase(
+      purchaseToken: purchaseToken,
+      productId: productId,
+    );
+  }
+
   Future<void> _handlePurchaseUpdates(
     List<PurchaseDetails> purchases,
     void Function(PurchaseUpdateResult) onResult,
@@ -99,6 +120,13 @@ class BillingService {
           purchase.status == PurchaseStatus.restored) {
         final result = await _verifyWithServer(purchase);
         onResult(result);
+        // Evento Analytics solo per un acquisto nuovo verificato, non per
+        // un ripristino (altrimenti ogni reinstall/cambio dispositivo
+        // conterebbe come un nuovo "acquisto Premium").
+        if (result == PurchaseUpdateResult.verifiedPremium &&
+            purchase.status == PurchaseStatus.purchased) {
+          AnalyticsService.logPremiumPurchased();
+        }
         // Conferma l'acquisto solo dopo la verifica server-side: se la
         // verifica fallisce, l'acquisto resta "pending" agli occhi di Play
         // e verrà ripresentato al prossimo avvio invece di sparire.
@@ -112,12 +140,22 @@ class BillingService {
 
   Future<PurchaseUpdateResult> _verifyWithServer(
     PurchaseDetails purchase,
-  ) async {
+  ) {
+    return _callVerifyPlayPurchase(
+      purchaseToken: purchase.verificationData.serverVerificationData,
+      productId: purchase.productID,
+    );
+  }
+
+  Future<PurchaseUpdateResult> _callVerifyPlayPurchase({
+    required String purchaseToken,
+    required String productId,
+  }) async {
     try {
       final callable = _functions.httpsCallable('verifyPlayPurchase');
       final result = await callable.call({
-        'purchaseToken': purchase.verificationData.serverVerificationData,
-        'productId': purchase.productID,
+        'purchaseToken': purchaseToken,
+        'productId': productId,
       });
       final isPremium = result.data['isPremium'] == true;
       return isPremium

@@ -88,6 +88,17 @@ class BusteScreen extends StatelessWidget {
                             ),
                             const SizedBox(width: 8),
                             IconButton(
+                              icon: const Icon(Icons.edit_outlined),
+                              tooltip: 'Modifica busta',
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      NewEnvelopeScreen(envelope: e),
+                                ),
+                              ),
+                            ),
+                            IconButton(
                               icon: const Icon(
                                 Icons.delete_outline,
                                 color: AppColors.danger,

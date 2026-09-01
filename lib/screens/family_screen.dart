@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
 import '../services/family_service.dart';
 import '../models/family.dart';
+import '../widgets/app_icons.dart';
 import 'family_dashboard_screen.dart';
 import 'new_family_expense_screen.dart';
 
@@ -125,7 +128,10 @@ class FamilyScreen extends StatelessWidget {
               child: ListTile(
                 leading: CircleAvatar(
                   backgroundColor: AppColors.secondary.withOpacity(0.12),
-                  child: const Icon(Icons.mail_outline, color: AppColors.secondary),
+                  child: const AppIcon(
+                    HeroIcons.envelope,
+                    color: AppColors.secondary,
+                  ),
                 ),
                 title: Text('Invito per ${inv['email']}'),
                 trailing: ElevatedButton(
@@ -168,8 +174,11 @@ class FamilyScreen extends StatelessWidget {
               stream: _service.streamMembers(familyId),
               builder: (context, snapshot) {
                 final members = snapshot.data ?? [];
+                final myUid = FirebaseAuth.instance.currentUser?.uid;
+                final isOwner = family?.ownerId == myUid;
                 return Column(
                   children: members.map((m) {
+                    final canRemove = isOwner && m.userId != family?.ownerId;
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       elevation: 0,
@@ -195,6 +204,20 @@ class FamilyScreen extends StatelessWidget {
                           m.role == 'owner' ? 'Proprietario' : 'Membro',
                           style: const TextStyle(color: AppColors.neutral),
                         ),
+                        trailing: canRemove
+                            ? IconButton(
+                                icon: const AppIcon(
+                                  HeroIcons.userMinus,
+                                  color: AppColors.danger,
+                                ),
+                                tooltip: 'Rimuovi dalla famiglia',
+                                onPressed: () => _confirmRemoveMember(
+                                  context,
+                                  familyId,
+                                  m,
+                                ),
+                              )
+                            : null,
                       ),
                     );
                   }).toList(),
@@ -204,7 +227,10 @@ class FamilyScreen extends StatelessWidget {
             const SizedBox(height: 20),
             ElevatedButton.icon(
               onPressed: () => _showInviteDialog(context, familyId),
-              icon: const Icon(Icons.person_add),
+              icon: const AppIcon(
+                HeroIcons.userPlus,
+                color: Colors.white,
+              ),
               label: const Text('Invita un membro'),
               style: _primaryButtonStyle(AppColors.secondary),
             ),
@@ -216,7 +242,10 @@ class FamilyScreen extends StatelessWidget {
                   builder: (_) => FamilyDashboardScreen(familyId: familyId),
                 ),
               ),
-              icon: const Icon(Icons.dashboard_outlined),
+              icon: const AppIcon(
+                HeroIcons.squares2x2,
+                color: Colors.white,
+              ),
               label: const Text('Apri dashboard famiglia'),
               style: _primaryButtonStyle(AppColors.accent),
             ),
@@ -228,13 +257,67 @@ class FamilyScreen extends StatelessWidget {
                   builder: (_) => NewFamilyExpenseScreen(familyId: familyId),
                 ),
               ),
-              icon: const Icon(Icons.add_shopping_cart),
+              icon: const AppIcon(
+                HeroIcons.minusCircle,
+                color: Colors.white,
+              ),
               label: const Text('Nuova spesa familiare'),
               style: _primaryButtonStyle(AppColors.warning),
             ),
           ],
         );
       },
+    );
+  }
+
+  void _confirmRemoveMember(
+    BuildContext context,
+    String familyId,
+    FamilyMember member,
+  ) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: const Text('Rimuovere il membro?'),
+        content: Text(
+          '${member.name} perderà l\'accesso ai dati di questa famiglia. '
+          'Le spese/entrate già registrate a suo nome restano nello storico.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            style: TextButton.styleFrom(foregroundColor: AppColors.neutral),
+            child: const Text('Annulla'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final navigator = Navigator.of(context);
+              final messenger = ScaffoldMessenger.of(context);
+              try {
+                final msg = await _service.removeMember(
+                  familyId,
+                  member.userId,
+                );
+                navigator.pop();
+                messenger.showSnackBar(SnackBar(content: Text(msg)));
+              } catch (e) {
+                navigator.pop();
+                messenger.showSnackBar(
+                  SnackBar(content: Text('Errore: ${e.toString()}')),
+                );
+              }
+            },
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            child: const Text(
+              'Rimuovi',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

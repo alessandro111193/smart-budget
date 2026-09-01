@@ -6,6 +6,14 @@ class AppUser {
   final int richiesteAiUsate;
   final int analisiAvanzateUsate;
 
+  /// Token/prodotto dell'ultimo abbonamento Google Play verificato (scritti
+  /// da verifyPlayPurchase). Usati per un ricontrollo periodico dello stato
+  /// reale su Play senza dover aspettare un nuovo evento del purchaseStream
+  /// (che uno store non ripresenta sempre spontaneamente, es. dopo una
+  /// scadenza). Null se non è mai stato verificato un acquisto Play.
+  final String? playPurchaseToken;
+  final String? playProductId;
+
   AppUser({
     required this.isPremium,
     required this.isTrialActive,
@@ -13,6 +21,8 @@ class AppUser {
     required this.scontriniUsati,
     required this.richiesteAiUsate,
     required this.analisiAvanzateUsate,
+    this.playPurchaseToken,
+    this.playProductId,
   });
 
   bool get hasAiAccess => isPremium || isTrialActive;

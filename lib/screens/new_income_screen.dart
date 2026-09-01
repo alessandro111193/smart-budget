@@ -6,6 +6,7 @@ import '../models/challenge.dart';
 import '../models/envelope.dart';
 import '../services/ai_service.dart';
 import '../services/firestore_service.dart';
+import '../services/habit_insights.dart';
 
 class NewIncomeScreen extends StatefulWidget {
   const NewIncomeScreen({super.key});
@@ -470,6 +471,34 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
           .join(', ');
       buffer.write(' Obiettivi di risparmio attivi: $goalLines.');
     }
+
+    // Storico spese: stesso riepilogo (medie per categoria + variazioni
+    // recenti) già usato per la chat e per l'analisi abitudini, così l'AI
+    // sa anche cosa aspettarsi di dover coprire con le buste, non solo il
+    // loro stato attuale.
+    final expenses = await _service.streamExpenses().first;
+    final habitSummary = HabitInsights.buildSummary(expenses);
+    if (habitSummary.isNotEmpty) {
+      buffer.write(' Storico spese: $habitSummary');
+    }
+
+    // Storico entrate: quante e di che importo medio sono state le entrate
+    // recenti, per capire se questa è un'entrata regolare o straordinaria.
+    final incomes = await _service.streamIncomes().first;
+    final sixMonthsAgo = DateTime.now().subtract(const Duration(days: 180));
+    final recentIncomes = incomes
+        .where((i) => i.date.isAfter(sixMonthsAgo))
+        .toList();
+    if (recentIncomes.isNotEmpty) {
+      final avgIncome =
+          recentIncomes.fold<double>(0, (s, i) => s + i.amount) /
+          recentIncomes.length;
+      buffer.write(
+        ' Storico entrate: ${recentIncomes.length} entrate negli ultimi 6 '
+        'mesi, importo medio €${avgIncome.toStringAsFixed(0)}.',
+      );
+    }
+
     return buffer.toString();
   }
 

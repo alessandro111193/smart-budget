@@ -5,24 +5,38 @@ import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
 
 class NewEnvelopeScreen extends StatefulWidget {
-  const NewEnvelopeScreen({super.key});
+  /// Se valorizzata, lo schermo lavora in modalità modifica su questa
+  /// busta esistente invece di crearne una nuova.
+  final Envelope? envelope;
+
+  const NewEnvelopeScreen({super.key, this.envelope});
 
   @override
   State<NewEnvelopeScreen> createState() => _NewEnvelopeScreenState();
 }
 
 class _NewEnvelopeScreenState extends State<NewEnvelopeScreen> {
-  final _nameController = TextEditingController();
-  final _budgetController = TextEditingController();
-  String _selectedIcon = '💰';
+  late final _nameController = TextEditingController(
+    text: widget.envelope?.name,
+  );
+  late final _budgetController = TextEditingController(
+    text: widget.envelope != null
+        ? widget.envelope!.budget.toStringAsFixed(2)
+        : '',
+  );
+  late String _selectedIcon = widget.envelope?.icon ?? '💰';
   final _service = FirestoreService();
+
+  bool get _isEditing => widget.envelope != null;
 
   final icons = ['🏠', '🚗', '🛒', '🎉', '💊', '📱', '🎓', '💰'];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Nuova busta')),
+      appBar: AppBar(
+        title: Text(_isEditing ? 'Modifica busta' : 'Nuova busta'),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -62,19 +76,30 @@ class _NewEnvelopeScreenState extends State<NewEnvelopeScreen> {
               onPressed: () async {
                 final budget = double.tryParse(_budgetController.text) ?? 0;
                 if (_nameController.text.isEmpty || budget <= 0) return;
-                await _service.addEnvelope(
-                  Envelope(
-                    id: '',
+                if (_isEditing) {
+                  await _service.updateEnvelope(
+                    widget.envelope!.id,
                     name: _nameController.text,
                     category: _nameController.text,
                     budget: budget,
-                    balance: budget, // parte piena, si svuota con le spese
                     icon: _selectedIcon,
-                  ),
-                );
+                    budgetDelta: budget - widget.envelope!.budget,
+                  );
+                } else {
+                  await _service.addEnvelope(
+                    Envelope(
+                      id: '',
+                      name: _nameController.text,
+                      category: _nameController.text,
+                      budget: budget,
+                      balance: budget, // parte piena, si svuota con le spese
+                      icon: _selectedIcon,
+                    ),
+                  );
+                }
                 if (context.mounted) Navigator.pop(context);
               },
-              child: const Text('Crea busta'),
+              child: Text(_isEditing ? 'Salva modifiche' : 'Crea busta'),
             ),
           ],
         ),

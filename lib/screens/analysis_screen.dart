@@ -8,6 +8,7 @@ import '../services/habit_insights.dart';
 import '../models/app_user.dart';
 import '../models/expense.dart';
 import '../models/envelope.dart';
+import '../models/income.dart';
 
 class AnalysisScreen extends StatelessWidget {
   AnalysisScreen({super.key});
@@ -70,7 +71,42 @@ class AnalysisScreen extends StatelessWidget {
               : totalThisMonth / daysElapsed;
           final projectedTotal = dailyAverage * daysInMonth;
 
-          return StreamBuilder<List<Envelope>>(
+          // Andamento spese ultimi 6 mesi (incluso quello corrente),
+          // sempre da dati reali (allExpenses), mai valori statici.
+          final monthlyTrend = <({String label, double total})>[];
+          for (int i = 5; i >= 0; i--) {
+            final monthDate = DateTime(now.year, now.month - i, 1);
+            final nextMonthDate = DateTime(now.year, now.month - i + 1, 1);
+            final total = allExpenses
+                .where(
+                  (e) =>
+                      !e.date.isBefore(monthDate) &&
+                      e.date.isBefore(nextMonthDate),
+                )
+                .fold<double>(0, (s, e) => s + e.amount);
+            const monthLabels = [
+              'Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu',
+              'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic',
+            ];
+            monthlyTrend.add(
+              (label: monthLabels[monthDate.month - 1], total: total),
+            );
+          }
+
+          return StreamBuilder<List<Income>>(
+            stream: _service.streamIncomes(),
+            builder: (context, incSnapshot) {
+              final allIncomes = incSnapshot.data ?? [];
+              final thisMonthIncomes = allIncomes
+                  .where((i) => !i.date.isBefore(startOfThisMonth))
+                  .toList();
+              final totalIncomeThisMonth = thisMonthIncomes.fold<double>(
+                0,
+                (s, i) => s + i.amount,
+              );
+              final netThisMonth = totalIncomeThisMonth - totalThisMonth;
+
+              return StreamBuilder<List<Envelope>>(
             stream: _service.streamEnvelopes(),
             builder: (context, envSnapshot) {
               final envelopes = envSnapshot.data ?? [];
@@ -82,6 +118,25 @@ class AnalysisScreen extends StatelessWidget {
                 final daysUntilEmpty = env.balance / dailyRate;
                 return daysUntilEmpty < daysRemaining && env.balance > 0;
               }).toList();
+
+              final byEnvelope = <String, double>{};
+              for (final e in thisMonthExpenses) {
+                byEnvelope[e.envelopeId] =
+                    (byEnvelope[e.envelopeId] ?? 0) + e.amount;
+              }
+              final envelopeSpendEntries =
+                  byEnvelope.entries.toList()
+                    ..sort((a, b) => b.value.compareTo(a.value));
+              final maxEnvelopeSpend = envelopeSpendEntries.isEmpty
+                  ? 0.0
+                  : envelopeSpendEntries.first.value;
+
+              final totalBudget = _service.totalBudget(envelopes);
+              final totalDisponibile = _service.totalDisponibile(envelopes);
+              final totalSpesoComplessivo = _service.totalSpeso(envelopes);
+
+              final budgetGiornalieroResiduo =
+                  daysRemaining > 0 ? totalDisponibile / daysRemaining : null;
 
               return ListView(
                 padding: const EdgeInsets.all(16),
@@ -137,6 +192,39 @@ class AnalysisScreen extends StatelessWidget {
                         ),
                       ],
                     ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Entrate / Spese / Saldo del mese corrente, sempre da
+                  // dati reali (Expense/Income di questo mese).
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _statTile(
+                          label: 'Entrate',
+                          value: totalIncomeThisMonth,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _statTile(
+                          label: 'Spese',
+                          value: totalThisMonth,
+                          color: AppColors.danger,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _statTile(
+                          label: 'Saldo',
+                          value: netThisMonth,
+                          color: netThisMonth >= 0
+                              ? AppColors.primary
+                              : AppColors.danger,
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 20),
 
@@ -231,11 +319,129 @@ class AnalysisScreen extends StatelessWidget {
                     const SizedBox(height: 20),
                   ],
 
+                  if (envelopeSpendEntries.isNotEmpty) ...[
+                    const Text(
+                      'Spese per busta',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ...List.generate(envelopeSpendEntries.length, (i) {
+                      final entry = envelopeSpendEntries[i];
+                      final env = envelopes.cast<Envelope?>().firstWhere(
+                        (e) => e?.id == entry.key,
+                        orElse: () => null,
+                      );
+                      final ratio = maxEnvelopeSpend == 0
+                          ? 0.0
+                          : entry.value / maxEnvelopeSpend;
+                      final color = AppColors
+                          .envelopeColors[i % AppColors.envelopeColors.length];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    env == null
+                                        ? 'Busta eliminata'
+                                        : '${env.icon} ${env.name}',
+                                    style: const TextStyle(fontSize: 13),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Text(
+                                  '\u20ac${entry.value.toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: ratio.clamp(0, 1),
+                                color: color,
+                                backgroundColor: Colors.grey.shade200,
+                                minHeight: 6,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 12),
+                  ],
+
+                  if (monthlyTrend.any((m) => m.total > 0)) ...[
+                    const Text(
+                      'Andamento ultimi 6 mesi',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 140,
+                      child: _MonthlyTrendChart(data: monthlyTrend),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+
+                  const Text(
+                    'Budget',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _statTile(
+                          label: 'Budget totale',
+                          value: totalBudget,
+                          color: AppColors.secondary,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _statTile(
+                          label: 'Utilizzato',
+                          value: totalSpesoComplessivo,
+                          color: AppColors.warning,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _statTile(
+                          label: 'Rimanente',
+                          value: totalDisponibile,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
                   _buildCard(
                     icon: '\uD83D\uDD2E',
                     title: 'Previsione fine mese',
                     body:
-                        'Se continui con questo ritmo, a fine mese avrai speso circa \u20ac${projectedTotal.toStringAsFixed(2)}.',
+                        'Se continui con questo ritmo, a fine mese avrai speso circa \u20ac${projectedTotal.toStringAsFixed(2)}.'
+                        '\nMedia giornaliera: \u20ac${dailyAverage.toStringAsFixed(2)} \u00B7 '
+                        'Mancano $daysRemaining giorni a fine mese'
+                        '${budgetGiornalieroResiduo != null ? ' \u00B7 Budget residuo: \u20ac${budgetGiornalieroResiduo.toStringAsFixed(2)}/giorno' : ''}.',
                     color: AppColors.accent,
                   ),
                   for (final env in atRiskEnvelopes)
@@ -252,7 +458,41 @@ class AnalysisScreen extends StatelessWidget {
               );
             },
           );
+            },
+          );
         },
+      ),
+    );
+  }
+
+  Widget _statTile({
+    required String label,
+    required double value,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontSize: 11, color: AppColors.neutral),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '€${value.toStringAsFixed(0)}',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -444,6 +684,91 @@ class _HabitAnalysisCardState extends State<_HabitAnalysisCard> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Grafico a barre dell'andamento delle spese negli ultimi 6 mesi (incluso
+/// quello corrente). Un'unica serie (spesa totale mensile): un solo colore,
+/// nessuna legenda necessaria, valore esatto al tocco su ciascuna barra.
+class _MonthlyTrendChart extends StatelessWidget {
+  const _MonthlyTrendChart({required this.data});
+
+  final List<({String label, double total})> data;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxValue = data.fold<double>(0, (m, d) => d.total > m ? d.total : m);
+    final maxY = maxValue == 0 ? 1.0 : maxValue * 1.25;
+
+    return BarChart(
+      BarChartData(
+        maxY: maxY,
+        alignment: BarChartAlignment.spaceAround,
+        gridData: const FlGridData(show: false),
+        borderData: FlBorderData(show: false),
+        barTouchData: BarTouchData(
+          touchTooltipData: BarTouchTooltipData(
+            getTooltipItem: (group, groupIndex, rod, rodIndex) {
+              return BarTooltipItem(
+                '€${rod.toY.toStringAsFixed(2)}',
+                const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 11,
+                ),
+              );
+            },
+          ),
+        ),
+        titlesData: FlTitlesData(
+          leftTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          rightTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          topTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 20,
+              getTitlesWidget: (value, meta) {
+                final i = value.toInt();
+                if (i < 0 || i >= data.length) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    data[i].label,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppColors.neutral,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        barGroups: List.generate(data.length, (i) {
+          final d = data[i];
+          return BarChartGroupData(
+            x: i,
+            barRods: [
+              BarChartRodData(
+                toY: d.total,
+                color: AppColors.primary,
+                width: 22,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(4),
+                ),
+              ),
+            ],
+          );
+        }),
+      ),
     );
   }
 }

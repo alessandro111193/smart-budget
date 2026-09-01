@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../models/app_user.dart';
 import '../models/envelope.dart';
 import '../models/family.dart';
+import '../services/ai_service.dart';
+import '../services/family_insights.dart';
 import '../services/family_service.dart';
+import '../services/firestore_service.dart';
 
 class NewFamilyIncomeScreen extends StatefulWidget {
   final String familyId;
@@ -15,10 +19,16 @@ class NewFamilyIncomeScreen extends StatefulWidget {
 
 class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
   final _service = FamilyService();
+  final _firestoreService = FirestoreService();
+  final _aiService = AiService();
   final _amountController = TextEditingController();
   final _descriptionController = TextEditingController();
   String? _selectedMemberId; // null = entrata del nucleo
   final Map<String, TextEditingController> _allocationControllers = {};
+
+  bool _aiLoading = false;
+  IncomeDistributionSuggestion? _aiSuggestion;
+  String? _aiError;
 
   double get _totalIncome => double.tryParse(_amountController.text) ?? 0;
 
@@ -120,6 +130,16 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
                           ],
                         ),
                       ),
+                      if (_totalIncome > 0 && envelopes.isNotEmpty)
+                        Padding(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 16),
+                          child: _aiSuggestionSection(
+                            envelopes,
+                            members,
+                            setLocal,
+                          ),
+                        ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Container(
@@ -225,6 +245,269 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
             },
           );
         },
+      ),
+    );
+  }
+
+  /// Stesso "Consiglio AI per la distribuzione" già disponibile per le
+  /// entrate personali (`new_income_screen.dart`), qui applicato alle
+  /// buste condivise della famiglia. L'accesso Premium/Trial resta
+  /// personale (non di famiglia), stesso pattern già usato per
+  /// `_FamilyAnalysisCard` in `family_dashboard_screen.dart`. Non applica
+  /// mai nulla da sola: precompila i campi già esistenti, il salvataggio
+  /// resta un'azione separata dell'utente.
+  Widget _aiSuggestionSection(
+    List<Envelope> envelopes,
+    List<FamilyMember> members,
+    StateSetter setLocal,
+  ) {
+    return StreamBuilder<AppUser>(
+      stream: _firestoreService.streamUser(),
+      builder: (context, snapshot) {
+        final hasAi = snapshot.data?.hasAiAccess ?? false;
+        if (!hasAi) return const SizedBox.shrink();
+
+        final suggestion = _aiSuggestion;
+        if (suggestion != null) {
+          final shownEnvelopes = envelopes
+              .where((e) => (suggestion.allocations[e.id] ?? 0) > 0)
+              .toList();
+          return Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const CircleAvatar(
+                      radius: 14,
+                      backgroundColor: AppColors.primary,
+                      child: Icon(
+                        Icons.smart_toy,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Ti consiglio questa distribuzione',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.close,
+                        size: 18,
+                        color: AppColors.neutral,
+                      ),
+                      onPressed: () =>
+                          setLocal(() => _aiSuggestion = null),
+                    ),
+                  ],
+                ),
+                if (suggestion.motivazione.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    suggestion.motivazione,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.neutral,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                ...shownEnvelopes.map(
+                  (e) => Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      '${e.icon} ${e.name}: €'
+                      '${suggestion.allocations[e.id]!.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onPressed: () => _applySuggestion(setLocal),
+                    child: const Text(
+                      'Applica distribuzione',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _aiLoading
+                      ? null
+                      : () => _requestAiSuggestion(
+                          envelopes,
+                          members,
+                          setLocal,
+                        ),
+                  icon: _aiLoading
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.primary,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.smart_toy_outlined,
+                          size: 18,
+                          color: AppColors.primary,
+                        ),
+                  label: Text(
+                    _aiLoading
+                        ? 'Sto pensando...'
+                        : 'Consiglio AI per la distribuzione',
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    side: const BorderSide(color: AppColors.primary),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              if (_aiError != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    _aiError!,
+                    style: const TextStyle(
+                      color: AppColors.danger,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<String> _buildAllocationSummary(
+    List<Envelope> envelopes,
+    List<FamilyMember> members,
+  ) async {
+    final envelopeLines = envelopes
+        .map((e) {
+          final pct = (e.percentUsed * 100).round();
+          return '${e.name} (budget €${e.budget.toStringAsFixed(0)}, saldo '
+              'attuale €${e.balance.toStringAsFixed(0)}, usata al $pct%)';
+        })
+        .join(', ');
+    final buffer = StringBuffer('Buste familiari attuali: $envelopeLines.');
+
+    // Storico spese famiglia: stesso riepilogo già usato per l'analisi AI
+    // della famiglia (Blocco 8), non un nuovo calcolo.
+    final expenses =
+        await _service.streamFamilyExpenses(widget.familyId).first;
+    final familySummary = FamilyInsights.buildSummary(expenses, members);
+    if (familySummary.isNotEmpty) {
+      buffer.write(' Storico spese famiglia: $familySummary');
+    }
+
+    // Storico entrate famiglia: importo medio delle entrate recenti.
+    final incomes = await _service.streamFamilyIncomes(widget.familyId).first;
+    final sixMonthsAgo = DateTime.now().subtract(const Duration(days: 180));
+    final recentIncomes =
+        incomes.where((i) => i.date.isAfter(sixMonthsAgo)).toList();
+    if (recentIncomes.isNotEmpty) {
+      final avgIncome =
+          recentIncomes.fold<double>(0, (s, i) => s + i.amount) /
+          recentIncomes.length;
+      buffer.write(
+        ' Storico entrate famiglia: ${recentIncomes.length} entrate negli '
+        'ultimi 6 mesi, importo medio €${avgIncome.toStringAsFixed(0)}.',
+      );
+    }
+
+    return buffer.toString();
+  }
+
+  Future<void> _requestAiSuggestion(
+    List<Envelope> envelopes,
+    List<FamilyMember> members,
+    StateSetter setLocal,
+  ) async {
+    setLocal(() {
+      _aiLoading = true;
+      _aiError = null;
+    });
+    try {
+      final summary = await _buildAllocationSummary(envelopes, members);
+      final suggestion = await _aiService.suggestIncomeDistribution(
+        incomeAmount: _totalIncome,
+        envelopes: envelopes.map((e) => (id: e.id, name: e.name)).toList(),
+        summary: summary,
+      );
+      if (!mounted) return;
+      setLocal(() {
+        _aiSuggestion = suggestion;
+        _aiLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setLocal(() {
+        _aiError = e.toString().replaceFirst('Exception: ', '');
+        _aiLoading = false;
+      });
+    }
+  }
+
+  void _applySuggestion(StateSetter setLocal) {
+    final suggestion = _aiSuggestion;
+    if (suggestion == null) return;
+    setLocal(() {
+      suggestion.allocations.forEach((envelopeId, amount) {
+        _allocationControllers[envelopeId]?.text = amount.toStringAsFixed(2);
+      });
+      _aiSuggestion = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Distribuzione applicata: controlla e correggi se serve prima '
+          'di salvare.',
+        ),
       ),
     );
   }

@@ -6,7 +6,15 @@ import '../theme/app_theme.dart';
 
 class NewFamilyEnvelopeScreen extends StatefulWidget {
   final String familyId;
-  const NewFamilyEnvelopeScreen({super.key, required this.familyId});
+  /// Se valorizzata, lo schermo lavora in modalità modifica su questa
+  /// busta familiare esistente invece di crearne una nuova.
+  final Envelope? envelope;
+
+  const NewFamilyEnvelopeScreen({
+    super.key,
+    required this.familyId,
+    this.envelope,
+  });
 
   @override
   State<NewFamilyEnvelopeScreen> createState() =>
@@ -14,10 +22,18 @@ class NewFamilyEnvelopeScreen extends StatefulWidget {
 }
 
 class _NewFamilyEnvelopeScreenState extends State<NewFamilyEnvelopeScreen> {
-  final _nameController = TextEditingController();
-  final _budgetController = TextEditingController();
-  String _selectedIcon = '👨‍👩‍👧';
+  late final _nameController = TextEditingController(
+    text: widget.envelope?.name,
+  );
+  late final _budgetController = TextEditingController(
+    text: widget.envelope != null
+        ? widget.envelope!.budget.toStringAsFixed(2)
+        : '',
+  );
+  late String _selectedIcon = widget.envelope?.icon ?? '👨‍👩‍👧';
   final _service = FamilyService();
+
+  bool get _isEditing => widget.envelope != null;
 
   final icons = ['🏠', '🚗', '🛒', '🎉', '💊', '📱', '🎓', '👨‍👩‍👧'];
 
@@ -39,9 +55,9 @@ class _NewFamilyEnvelopeScreenState extends State<NewFamilyEnvelopeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Nuova busta familiare',
-          style: TextStyle(color: AppColors.ink, fontSize: 17),
+        title: Text(
+          _isEditing ? 'Modifica busta familiare' : 'Nuova busta familiare',
+          style: const TextStyle(color: AppColors.ink, fontSize: 17),
         ),
         backgroundColor: Colors.white,
         elevation: 0,
@@ -100,22 +116,34 @@ class _NewFamilyEnvelopeScreenState extends State<NewFamilyEnvelopeScreen> {
                 onPressed: () async {
                   final budget = double.tryParse(_budgetController.text) ?? 0;
                   if (_nameController.text.isEmpty || budget <= 0) return;
-                  await _service.addFamilyEnvelope(
-                    widget.familyId,
-                    Envelope(
-                      id: '',
+                  if (_isEditing) {
+                    await _service.updateFamilyEnvelope(
+                      widget.familyId,
+                      widget.envelope!.id,
                       name: _nameController.text,
                       category: _nameController.text,
                       budget: budget,
-                      balance: budget,
                       icon: _selectedIcon,
-                    ),
-                  );
+                      budgetDelta: budget - widget.envelope!.budget,
+                    );
+                  } else {
+                    await _service.addFamilyEnvelope(
+                      widget.familyId,
+                      Envelope(
+                        id: '',
+                        name: _nameController.text,
+                        category: _nameController.text,
+                        budget: budget,
+                        balance: budget,
+                        icon: _selectedIcon,
+                      ),
+                    );
+                  }
                   if (context.mounted) Navigator.pop(context);
                 },
-                child: const Text(
-                  'Crea busta familiare',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                child: Text(
+                  _isEditing ? 'Salva modifiche' : 'Crea busta familiare',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
             ),

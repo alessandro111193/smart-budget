@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
 import '../models/app_user.dart';
 import '../services/billing_service.dart';
 import '../services/firestore_service.dart';
+import '../widgets/app_icons.dart';
 
 class PremiumScreen extends StatefulWidget {
   const PremiumScreen({super.key});
@@ -20,12 +22,14 @@ class _PremiumScreenState extends State<PremiumScreen> {
   ProductDetails? _premiumProduct;
   bool _billingAvailable = false;
   bool _purchaseInProgress = false;
+  bool _restoreInProgress = false;
 
   @override
   void initState() {
     super.initState();
     _billing.listen(onResult: _onPurchaseResult);
     _initBilling();
+    _reverifyIfNeeded();
   }
 
   Future<void> _initBilling() async {
@@ -39,9 +43,33 @@ class _PremiumScreenState extends State<PremiumScreen> {
     });
   }
 
+  /// Ricontrollo dello stato abbonamento ad ogni apertura di questa
+  /// schermata: se l'utente risulta già Premium con un token Google Play
+  /// salvato, lo riverifica presso Play invece di fidarsi solo dell'ultimo
+  /// stato scritto (che potrebbe non riflettere una cancellazione/scadenza
+  /// nel frattempo — vedi commento su BillingService.reverifyStoredSubscription).
+  /// Il trial simulato non è coinvolto: non ha nulla da riverificare presso
+  /// uno store.
+  Future<void> _reverifyIfNeeded() async {
+    final user = await _service.streamUser().first;
+    if (!mounted || !user.isPremium) return;
+    final token = user.playPurchaseToken;
+    final productId = user.playProductId;
+    if (token == null || productId == null) return;
+    await _billing.reverifyStoredSubscription(
+      purchaseToken: token,
+      productId: productId,
+    );
+    // Non serve gestire il risultato qui: verifyPlayPurchase scrive già lo
+    // stato aggiornato su Firestore, e streamUser() lo riflette da solo.
+  }
+
   void _onPurchaseResult(PurchaseUpdateResult result) {
     if (!mounted) return;
-    setState(() => _purchaseInProgress = false);
+    setState(() {
+      _purchaseInProgress = false;
+      _restoreInProgress = false;
+    });
     final message = switch (result) {
       PurchaseUpdateResult.verifiedPremium =>
         'Abbonamento attivato, benvenuto in Premium!',
@@ -99,8 +127,9 @@ class _PremiumScreenState extends State<PremiumScreen> {
                         color: Colors.white24,
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
-                        Icons.workspace_premium,
+                      child: const AppIcon(
+                        HeroIcons.star,
+                        solid: true,
                         color: Colors.white,
                         size: 32,
                       ),
@@ -253,8 +282,45 @@ class _PremiumScreenState extends State<PremiumScreen> {
                   : const Text('Abbonati subito su Google Play'),
             ),
           ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: _restoreInProgress ? null : _restorePurchases,
+              style: TextButton.styleFrom(foregroundColor: Colors.white70),
+              child: _restoreInProgress
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        color: Colors.white70,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : const Text('Ripristina acquisti'),
+            ),
+          ),
         ],
       ],
     );
+  }
+
+  Future<void> _restorePurchases() async {
+    setState(() => _restoreInProgress = true);
+    try {
+      await _billing.restorePurchases();
+    } catch (_) {
+      // L'esito arriva comunque tramite _onPurchaseResult se lo store
+      // trova qualcosa; qui intercettiamo solo un eventuale errore
+      // nell'avvio della richiesta stessa.
+    } finally {
+      // _onPurchaseResult azzera già _purchaseInProgress sugli eventi
+      // reali; questo timeout evita che il bottone resti bloccato in
+      // caricamento se Play non trova nulla da ripristinare (nessun
+      // evento arriva affatto in quel caso).
+      Future.delayed(const Duration(seconds: 5), () {
+        if (mounted) setState(() => _restoreInProgress = false);
+      });
+    }
   }
 }

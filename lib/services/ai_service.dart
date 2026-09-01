@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:cloud_functions/cloud_functions.dart';
 
+import 'analytics_service.dart';
+
 class AiService {
   final _functions = FirebaseFunctions.instance;
 
@@ -13,6 +15,7 @@ class AiService {
         'question': question,
         'spendingSummary': spendingSummary,
       });
+      AnalyticsService.logAiFeatureUsed('chat');
       return result.data['answer'] as String;
     } on FirebaseFunctionsException catch (e) {
       if (e.code == 'resource-exhausted') {
@@ -50,6 +53,8 @@ class AiService {
       final result = await callable.call(payload);
 
       final data = Map<String, dynamic>.from(result.data as Map);
+      AnalyticsService.logAiFeatureUsed('scan_receipt');
+      AnalyticsService.logScannerUsed();
       return data;
     } on FirebaseFunctionsException catch (e) {
       if (e.code == 'resource-exhausted') {
@@ -90,6 +95,7 @@ class AiService {
       final allocazioni = List<Map<String, dynamic>>.from(
         data['allocazioni'] ?? [],
       );
+      AnalyticsService.logAiFeatureUsed('income_distribution');
       return IncomeDistributionSuggestion(
         motivazione: data['motivazione'] as String? ?? '',
         allocations: {
@@ -130,6 +136,7 @@ class AiService {
       final payload = <String, dynamic>{'kind': kind};
       if (summary != null) payload['summary'] = summary;
       final result = await callable.call(payload);
+      AnalyticsService.logAiFeatureUsed('insight_$kind');
       return Map<String, dynamic>.from(result.data as Map);
     } on FirebaseFunctionsException catch (e) {
       if (e.code == 'resource-exhausted') {
@@ -162,6 +169,7 @@ class AiService {
       final articoli = List<Map<String, dynamic>>.from(
         data['articoli'] ?? [],
       );
+      AnalyticsService.logAiFeatureUsed('shopping_list');
       return ShoppingListSuggestion(
         motivazione: data['motivazione'] as String? ?? '',
         totaleStimato: (data['totaleStimato'] as num?)?.toDouble() ?? 0,

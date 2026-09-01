@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../models/app_user.dart';
 import '../models/family.dart';
 import '../models/family_expense.dart';
+import '../models/family_income.dart';
 import '../models/envelope.dart';
 import '../services/ai_service.dart';
 import '../services/family_insights.dart';
@@ -46,80 +47,94 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
             builder: (context, expSnapshot) {
               final expenses = expSnapshot.data ?? [];
 
-              return StreamBuilder<List<Envelope>>(
-                stream: _service.streamFamilyEnvelopes(widget.familyId),
-                builder: (context, envSnapshot) {
-                  final envelopes = envSnapshot.data ?? [];
+              return StreamBuilder<List<FamilyIncome>>(
+                stream: _service.streamFamilyIncomes(widget.familyId),
+                builder: (context, incSnapshot) {
+                  final incomes = incSnapshot.data ?? [];
 
-                  return ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      _scopeSelector(members),
-                      const SizedBox(height: 16),
-                      _totalsCard(expenses, members),
-                      const SizedBox(height: 12),
-                      _FamilyAnalysisCard(expenses: expenses, members: members),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Buste condivise',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
+                  return StreamBuilder<List<Envelope>>(
+                    stream: _service.streamFamilyEnvelopes(widget.familyId),
+                    builder: (context, envSnapshot) {
+                      final envelopes = envSnapshot.data ?? [];
+
+                      return ListView(
+                        padding: const EdgeInsets.all(16),
                         children: [
-                          Expanded(
-                            child: TextButton.icon(
-                              style: TextButton.styleFrom(
-                                foregroundColor: AppColors.primary,
-                                textStyle: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => NewFamilyEnvelopeScreen(
-                                    familyId: widget.familyId,
-                                  ),
-                                ),
-                              ),
-                              icon: const Icon(Icons.add),
-                              label: const Text('Nuova busta'),
+                          _scopeSelector(members),
+                          const SizedBox(height: 16),
+                          _totalsCard(expenses, members),
+                          const SizedBox(height: 12),
+                          _incomesCard(incomes),
+                          const SizedBox(height: 12),
+                          _categoryBreakdown(expenses, envelopes, members),
+                          const SizedBox(height: 12),
+                          _FamilyAnalysisCard(
+                            expenses: expenses,
+                            members: members,
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Buste condivise',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                          Expanded(
-                            child: TextButton.icon(
-                              style: TextButton.styleFrom(
-                                foregroundColor: AppColors.primary,
-                                textStyle: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => NewFamilyIncomeScreen(
-                                    familyId: widget.familyId,
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextButton.icon(
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: AppColors.primary,
+                                    textStyle: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
+                                  onPressed: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => NewFamilyEnvelopeScreen(
+                                        familyId: widget.familyId,
+                                      ),
+                                    ),
+                                  ),
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('Nuova busta'),
                                 ),
                               ),
-                              icon: const Icon(Icons.add_card),
-                              label: const Text('Nuova entrata'),
-                            ),
+                              Expanded(
+                                child: TextButton.icon(
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: AppColors.primary,
+                                    textStyle: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  onPressed: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => NewFamilyIncomeScreen(
+                                        familyId: widget.familyId,
+                                      ),
+                                    ),
+                                  ),
+                                  icon: const Icon(Icons.add_card),
+                                  label: const Text('Nuova entrata'),
+                                ),
+                              ),
+                            ],
                           ),
+                          const SizedBox(height: 8),
+                          if (envelopes.isEmpty)
+                            const Text(
+                              'Nessuna busta familiare ancora creata.',
+                              style: TextStyle(color: AppColors.neutral),
+                            ),
+                          ...envelopes.map((e) => _envelopeTile(e)),
                         ],
-                      ),
-                      const SizedBox(height: 8),
-                      if (envelopes.isEmpty)
-                        const Text(
-                          'Nessuna busta familiare ancora creata.',
-                          style: TextStyle(color: AppColors.neutral),
-                        ),
-                      ...envelopes.map((e) => _envelopeTile(e)),
-                    ],
+                      );
+                    },
                   );
                 },
               );
@@ -210,6 +225,133 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
     );
   }
 
+  Widget _incomesCard(List<FamilyIncome> incomes) {
+    final isFamily = _selectedScope == 'Famiglia';
+    final total = isFamily
+        ? _service.familyTotalIncomes(incomes)
+        : _service.memberIncomeTotal(incomes, _selectedScope);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              isFamily ? 'Entrate totali famiglia' : 'Le tue entrate',
+              style: const TextStyle(
+                color: AppColors.neutral,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Text(
+            '€${total.toStringAsFixed(2)}',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              color: AppColors.primary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Ripartizione per busta delle spese nello scope selezionato (Famiglia
+  /// o singolo membro). La busta funge da "categoria" perché FamilyExpense
+  /// non ha un campo categoria proprio — stessa scelta già fatta per le
+  /// spese personali dell'app (vedi Blocco Famiglia in CLAUDE.md), non
+  /// introduce un nuovo pattern dati incoerente.
+  Widget _categoryBreakdown(
+    List<FamilyExpense> expenses,
+    List<Envelope> envelopes,
+    List<FamilyMember> members,
+  ) {
+    final isFamily = _selectedScope == 'Famiglia';
+    final byEnvelope = <String, double>{};
+    for (final e in expenses) {
+      final quota = isFamily
+          ? e.amount
+          : e.quotaFor(_selectedScope, members.length);
+      if (quota <= 0) continue;
+      byEnvelope[e.envelopeId] = (byEnvelope[e.envelopeId] ?? 0) + quota;
+    }
+    final entries = byEnvelope.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    if (entries.isEmpty) return const SizedBox.shrink();
+    final maxValue = entries.first.value;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Per busta',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
+          const SizedBox(height: 10),
+          ...List.generate(entries.length, (i) {
+            final entry = entries[i];
+            final env = envelopes.cast<Envelope?>().firstWhere(
+              (e) => e?.id == entry.key,
+              orElse: () => null,
+            );
+            final ratio = maxValue == 0 ? 0.0 : entry.value / maxValue;
+            final color =
+                AppColors.envelopeColors[i % AppColors.envelopeColors.length];
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          env == null
+                              ? 'Busta eliminata'
+                              : '${env.icon} ${env.name}',
+                          style: const TextStyle(fontSize: 12),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(
+                        '€${entry.value.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: ratio.clamp(0, 1),
+                      color: color,
+                      backgroundColor: Colors.grey.shade200,
+                      minHeight: 5,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
   Widget _envelopeTile(Envelope e) {
     final index = e.id.hashCode % AppColors.envelopeColors.length;
     final color = AppColors.envelopeColors[index.abs()];
@@ -222,6 +364,15 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
         borderRadius: BorderRadius.circular(16),
       ),
       child: ListTile(
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => NewFamilyEnvelopeScreen(
+              familyId: widget.familyId,
+              envelope: e,
+            ),
+          ),
+        ),
         leading: CircleAvatar(
           backgroundColor: color.withOpacity(0.15),
           child: Text(e.icon, style: const TextStyle(fontSize: 18)),
@@ -239,10 +390,58 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
             ),
           ),
         ),
-        trailing: Text(
-          '€${e.balance.toStringAsFixed(0)} / €${e.budget.toStringAsFixed(0)}',
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '€${e.balance.toStringAsFixed(0)} / €${e.budget.toStringAsFixed(0)}',
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+            ),
+            IconButton(
+              icon: const Icon(
+                Icons.delete_outline,
+                color: AppColors.danger,
+                size: 20,
+              ),
+              tooltip: 'Elimina busta familiare',
+              onPressed: () => _confirmDeleteEnvelope(context, e),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+
+  void _confirmDeleteEnvelope(BuildContext context, Envelope e) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: const Text('Eliminare la busta?'),
+        content: Text(
+          'Vuoi davvero eliminare la busta familiare "${e.name}"? '
+          'Le spese/entrate già registrate restano nello storico.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            style: TextButton.styleFrom(foregroundColor: AppColors.neutral),
+            child: const Text('Annulla'),
+          ),
+          TextButton(
+            onPressed: () async {
+              await _service.deleteFamilyEnvelope(widget.familyId, e.id);
+              if (context.mounted) Navigator.pop(context);
+            },
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            child: const Text(
+              'Elimina',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
       ),
     );
   }

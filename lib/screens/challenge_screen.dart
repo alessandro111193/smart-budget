@@ -126,6 +126,15 @@ class ChallengeScreen extends StatelessWidget {
       );
     }
 
+    // Sinking fund di risparmio collegato a una busta: il saldo reale
+    // della busta è l'unica fonte di verità per il progresso, non il
+    // contatore savedAmount della challenge (che per questi casi non viene
+    // più aggiornato manualmente — vedi il bottone più sotto).
+    final isLinkedSinkingFund = isSaving && linkedEnvelope != null;
+    final effective = isLinkedSinkingFund
+        ? c.copyWithSavedAmount(linkedEnvelope.balance)
+        : c;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 0,
@@ -191,7 +200,7 @@ class ChallengeScreen extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: LinearProgressIndicator(
-                value: c.percentComplete.clamp(0, 1),
+                value: effective.percentComplete.clamp(0, 1),
                 color: progressColor,
                 backgroundColor: Colors.grey.shade200,
                 minHeight: 8,
@@ -200,34 +209,34 @@ class ChallengeScreen extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               isSaving
-                  ? '€${c.savedAmount.toStringAsFixed(0)} / €${c.targetAmount.toStringAsFixed(0)} risparmiati'
-                  : '€${c.savedAmount.toStringAsFixed(0)} / €${c.targetAmount.toStringAsFixed(0)} del tetto di spesa',
+                  ? '€${effective.savedAmount.toStringAsFixed(0)} / €${effective.targetAmount.toStringAsFixed(0)} risparmiati'
+                  : '€${effective.savedAmount.toStringAsFixed(0)} / €${effective.targetAmount.toStringAsFixed(0)} del tetto di spesa',
             ),
-            if (isSaving && c.monthlyQuota != null)
+            if (isSaving && effective.monthlyQuota != null)
               Text(
-                'Quota mensile consigliata: €${c.monthlyQuota!.toStringAsFixed(2)}',
+                'Quota mensile consigliata: €${effective.monthlyQuota!.toStringAsFixed(2)}',
                 style: const TextStyle(color: AppColors.neutral, fontSize: 12),
               ),
-            if (isSaving && c.isOnTrack != null) ...[
+            if (isSaving && effective.isOnTrack != null) ...[
               const SizedBox(height: 6),
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: (c.isOnTrack!
+                  color: (effective.isOnTrack!
                           ? AppColors.primary
                           : AppColors.warning)
                       .withOpacity(0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  c.isOnTrack!
+                  effective.isOnTrack!
                       ? 'In linea con il piano'
                       : 'Sei indietro rispetto al piano',
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w600,
-                    color: c.isOnTrack!
+                    color: effective.isOnTrack!
                         ? AppColors.primary
                         : AppColors.warning,
                   ),
@@ -240,21 +249,29 @@ class ChallengeScreen extends StatelessWidget {
                 style: TextStyle(color: AppColors.danger, fontSize: 12),
               ),
             const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: () => _showAddAmountDialog(context, c, isSaving),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.primary,
+            if (isLinkedSinkingFund)
+              const Text(
+                'Il saldo si aggiorna quando distribuisci un\'entrata verso '
+                'questa busta, dalla schermata "Nuova entrata".',
+                style: TextStyle(fontSize: 11, color: AppColors.neutral),
+              )
+            else
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () =>
+                        _showAddAmountDialog(context, c, isSaving),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                    ),
+                    child: Text(
+                      isSaving ? '+ Aggiungi risparmio' : '+ Registra spesa',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
-                  child: Text(
-                    isSaving ? '+ Aggiungi risparmio' : '+ Registra spesa',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
+                ],
+              ),
           ],
         ),
       ),
@@ -337,7 +354,44 @@ class ChallengeScreen extends StatelessWidget {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: () => setState(() {
+                          selectedType = ChallengeType.saving;
+                          titleController.text = 'Sfida delle 52 settimane';
+                          targetController.text = '1378';
+                          deadline = DateTime.now().add(
+                            const Duration(days: 364),
+                          );
+                        }),
+                        icon: const Icon(Icons.local_fire_department_outlined,
+                            size: 18),
+                        label: const Text(
+                          'Usa il template: Sfida delle 52 settimane',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.warning,
+                          side: const BorderSide(color: AppColors.warning),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4, bottom: 4),
+                        child: Text(
+                          'Metti da parte €1 la 1ª settimana, €2 la 2ª... '
+                          'fino a €52 la 52ª: €1.378 in un anno. Puoi comunque '
+                          'modificare titolo, obiettivo e scadenza qui sotto.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppColors.neutral,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       DropdownButtonFormField<ChallengeType>(
                         initialValue: selectedType,
                         isExpanded: true,

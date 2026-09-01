@@ -11,6 +11,7 @@ import 'widgets/bottom_nav_shell.dart';
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'services/ad_service.dart';
+import 'services/analytics_service.dart';
 import 'services/onboarding_service.dart';
 
 // Metti questo a false quando vuoi testare contro Firebase vero
@@ -33,6 +34,7 @@ void main() async {
   }
 
   await AdService.initialize();
+  AnalyticsService.logAppOpen();
 
   runApp(const SmartBudgetApp());
 }

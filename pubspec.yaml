@@ -45,7 +45,8 @@ dependencies:
   in_app_purchase: ^3.3.0
   google_mobile_ads: ^9.1.0
   shared_preferences: ^2.5.5
-
+  firebase_analytics: ^12.5.0
+  heroicons: ^0.11.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

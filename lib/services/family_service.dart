@@ -6,6 +6,7 @@ import '../models/envelope.dart';
 import '../models/family.dart';
 import '../models/family_expense.dart';
 import '../models/family_income.dart';
+import 'analytics_service.dart';
 
 class FamilyService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -37,6 +38,7 @@ class FamilyService {
     await _db.collection('users').doc(userId).set({
       'familyId': familyRef.id,
     }, SetOptions(merge: true));
+    AnalyticsService.logFamilyCreated();
     return familyRef.id;
   }
 
@@ -79,6 +81,7 @@ class FamilyService {
       'inviteFamilyMember',
     );
     final result = await callable.call({'familyId': familyId, 'email': email});
+    AnalyticsService.logFamilyMemberInvited();
     return result.data['message'] as String;
   }
 
@@ -110,6 +113,19 @@ class FamilyService {
     await callable.call({'familyId': familyId, 'inviteId': inviteId});
   }
 
+  /// Rimuove un membro dalla famiglia — solo l'owner può farlo (verificato
+  /// anche lato server dalla Cloud Function, non solo nascosto in UI).
+  Future<String> removeMember(String familyId, String memberId) async {
+    final callable = FirebaseFunctions.instance.httpsCallable(
+      'removeFamilyMember',
+    );
+    final result = await callable.call({
+      'familyId': familyId,
+      'memberId': memberId,
+    });
+    return result.data['message'] as String;
+  }
+
   CollectionReference _familyEnvelopes(String familyId) =>
       _db.collection('families').doc(familyId).collection('envelopes');
 
@@ -136,14 +152,40 @@ class FamilyService {
     );
   }
 
-  Future<void> addFamilyEnvelope(String familyId, Envelope e) {
-    return _familyEnvelopes(familyId).add({
+  Future<void> addFamilyEnvelope(String familyId, Envelope e) async {
+    await _familyEnvelopes(familyId).add({
       'name': e.name,
       'category': e.category,
       'budget': e.budget,
       'balance': e.balance,
       'icon': e.icon,
     });
+    AnalyticsService.logEnvelopeCreated(isFamily: true);
+  }
+
+  /// Stesso comportamento di FirestoreService.updateEnvelope: il saldo
+  /// viene spostato della differenza di budget, così "quanto è già stato
+  /// speso" resta invariato dopo la modifica.
+  Future<void> updateFamilyEnvelope(
+    String familyId,
+    String envelopeId, {
+    required String name,
+    required String category,
+    required double budget,
+    required String icon,
+    required double budgetDelta,
+  }) {
+    return _familyEnvelopes(familyId).doc(envelopeId).update({
+      'name': name,
+      'category': category,
+      'budget': budget,
+      'icon': icon,
+      'balance': FieldValue.increment(budgetDelta),
+    });
+  }
+
+  Future<void> deleteFamilyEnvelope(String familyId, String envelopeId) {
+    return _familyEnvelopes(familyId).doc(envelopeId).delete();
   }
 
   Stream<List<FamilyExpense>> streamFamilyExpenses(String familyId) {
@@ -169,6 +211,7 @@ class FamilyService {
       transaction.set(expenseRef, exp.toMap());
       transaction.update(envelopeRef, {'balance': currentBalance - exp.amount});
     });
+    AnalyticsService.logExpenseAdded(isFamily: true);
   }
 
   Stream<List<FamilyIncome>> streamFamilyIncomes(String familyId) {
@@ -181,6 +224,10 @@ class FamilyService {
     );
   }
 
+  /// Batch atomico con FieldValue.increment (stesso motivo di
+  /// FirestoreService.addIncome): più membri della famiglia possono
+  /// scrivere sulle stesse buste condivise quasi contemporaneamente, quindi
+  /// niente letture separate del saldo prima di scriverlo.
   Future<void> addFamilyIncome({
     required String familyId,
     required double amount,
@@ -188,21 +235,22 @@ class FamilyService {
     String? memberId,
     required Map<String, double> allocations,
   }) async {
-    await _familyIncomes(familyId).add({
+    final batch = _db.batch();
+    batch.set(_familyIncomes(familyId).doc(), {
       'amount': amount,
       'description': description,
       'date': DateTime.now().toIso8601String(),
       'memberId': memberId,
+      'allocations': allocations,
     });
     for (final entry in allocations.entries) {
       if (entry.value <= 0) continue;
-      final envRef = _familyEnvelopes(familyId).doc(entry.key);
-      final doc = await envRef.get();
-      if (doc.exists) {
-        final current = (doc['balance'] as num).toDouble();
-        await envRef.update({'balance': current + entry.value});
-      }
+      batch.update(_familyEnvelopes(familyId).doc(entry.key), {
+        'balance': FieldValue.increment(entry.value),
+      });
     }
+    await batch.commit();
+    AnalyticsService.logIncomeAdded(isFamily: true);
   }
 
   /// Totale famiglia: somma di 'amount', una volta sola per spesa — mai doppio conteggio
@@ -220,4 +268,16 @@ class FamilyService {
       (s, e) => s + e.quotaFor(memberId, totalMembersCount),
     );
   }
+
+  /// Totale entrate famiglia (tutte, incluse quelle non attribuite a un
+  /// membro specifico)
+  double familyTotalIncomes(List<FamilyIncome> incomes) =>
+      incomes.fold(0, (s, i) => s + i.amount);
+
+  /// Entrate registrate a nome di un membro specifico (non include le
+  /// entrate del nucleo senza memberId)
+  double memberIncomeTotal(List<FamilyIncome> incomes, String memberId) =>
+      incomes
+          .where((i) => i.memberId == memberId)
+          .fold(0, (s, i) => s + i.amount);
 }

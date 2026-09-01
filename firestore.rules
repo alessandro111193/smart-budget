@@ -3,7 +3,28 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      function isSelf() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+      // Campi di stato Premium/Trial/billing: scrivibili SOLO dalle Cloud
+      // Function (Admin SDK bypassa le regole), mai dal client diretto —
+      // altrimenti un utente potrebbe auto-assegnarsi Premium o azzerare i
+      // propri contatori di utilizzo AI modificando solo l'app.
+      function protectedFields() {
+        return [
+          'isPremium', 'trialEnd', 'scontriniUsati', 'richiesteAiUsate',
+          'analisiAvanzateUsate', 'playProductId', 'playPurchaseToken',
+          'playSubscriptionExpiry',
+        ];
+      }
+
+      allow read: if isSelf();
+      allow create: if isSelf() &&
+        !request.resource.data.keys().hasAny(protectedFields());
+      allow update: if isSelf() &&
+        !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(protectedFields());
+      allow delete: if isSelf();
 
       match /envelopes/{envelopeId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
@@ -35,7 +56,13 @@ service cloud.firestore {
 
       match /members/{memberId} {
         allow read: if isMember();
-        allow create: if isOwner() || request.auth.uid == memberId;
+        // Solo l'owner aggiunge membri (incluso se stesso, alla creazione
+        // della famiglia: a quel punto il documento famiglia esiste già con
+        // ownerId == suo uid, quindi isOwner() è già vero). Prima permetteva
+        // anche "request.auth.uid == memberId", che lasciava chiunque
+        // auto-iscriversi a QUALSIASI famiglia di cui conoscesse l'id,
+        // bypassando l'invito.
+        allow create: if isOwner();
         allow update, delete: if isOwner();
       }
 
@@ -43,7 +70,12 @@ service cloud.firestore {
         allow read: if request.auth != null &&
           (resource.data.email == request.auth.token.email || isOwner());
         allow create: if isOwner();
-        allow update: if request.auth != null && resource.data.email == request.auth.token.email;
+        // Il destinatario può solo cambiare lo stato dell'invito (es.
+        // accettarlo), mai altri campi come l'email a cui è destinato.
+        allow update: if request.auth != null &&
+          resource.data.email == request.auth.token.email &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status']);
         allow delete: if isOwner();
       }
 

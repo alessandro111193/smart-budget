@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../theme/app_theme.dart';
 import '../screens/home_screen.dart';
 import '../screens/buste_screen.dart';
 import '../screens/spese_screen.dart';
@@ -8,7 +7,9 @@ import '../screens/analysis_screen.dart';
 import '../screens/ai_chat_screen.dart';
 import '../screens/premium_screen.dart';
 import '../services/firestore_service.dart';
+import '../theme/icon_palette.dart';
 import '../models/app_user.dart';
+import 'app_icons.dart';
 import 'free_ad_banner.dart';
 
 class BottomNavShell extends StatefulWidget {
@@ -54,27 +55,35 @@ class _BottomNavShellState extends State<BottomNavShell> {
                 currentIndex: _index,
                 onTap: (i) => setState(() => _index = i),
                 type: BottomNavigationBarType.fixed,
-                selectedItemColor: AppColors.primary,
-                unselectedItemColor: AppColors.neutral,
+                selectedItemColor: IconPalette.primary,
+                unselectedItemColor: IconPalette.accent,
                 items: const [
                   BottomNavigationBarItem(
-                    icon: Icon(Icons.home_outlined),
+                    icon: NavIcon(type: NavType.home, selected: false),
+                    activeIcon: NavIcon(type: NavType.home, selected: true),
                     label: 'Home',
                   ),
                   BottomNavigationBarItem(
-                    icon: Icon(Icons.folder_outlined),
+                    icon: NavIcon(type: NavType.buste, selected: false),
+                    activeIcon: NavIcon(type: NavType.buste, selected: true),
                     label: 'Buste',
                   ),
                   BottomNavigationBarItem(
-                    icon: Icon(Icons.receipt_long_outlined),
+                    icon: NavIcon(type: NavType.spese, selected: false),
+                    activeIcon: NavIcon(type: NavType.spese, selected: true),
                     label: 'Spese',
                   ),
                   BottomNavigationBarItem(
-                    icon: Icon(Icons.bar_chart_outlined),
+                    icon: NavIcon(type: NavType.statistiche, selected: false),
+                    activeIcon: NavIcon(
+                      type: NavType.statistiche,
+                      selected: true,
+                    ),
                     label: 'Statistiche',
                   ),
                   BottomNavigationBarItem(
-                    icon: Icon(Icons.smart_toy_outlined),
+                    icon: NavIcon(type: NavType.ai, selected: false),
+                    activeIcon: NavIcon(type: NavType.ai, selected: true),
                     label: 'AI',
                   ),
                 ],

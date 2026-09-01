@@ -717,9 +717,11 @@ exports.suggestIncomeDistribution = onCall(
           "lasciare una parte non assegnata se ha senso). Non è " +
           "necessario dare qualcosa a ogni busta. Dai priorità alle buste " +
           "più vicine a esaurirsi e agli eventuali obiettivi di risparmio " +
-          "con quota mensile indicata. Aggiungi \"motivazione\": una " +
-          "sola frase breve in italiano che spieghi la logica principale " +
-          "della proposta.";
+          "con quota mensile indicata. Se lo storico fornito mostra " +
+          "categorie di spesa in aumento o un'entrata insolita rispetto " +
+          "al solito, tienine conto nella proposta. Aggiungi " +
+          "\"motivazione\": una sola frase breve in italiano che spieghi " +
+          "la logica principale della proposta.";
 
         const result = await model.generateContent(prompt);
         const parsed = JSON.parse(result.response.text());
@@ -957,6 +959,92 @@ exports.acceptFamilyInvite = onCall(async (request) => {
   await inviteRef.update({status: "accepted"});
 
   return {message: "Ti sei unito alla famiglia."};
+});
+
+// Rimuove un membro dalla famiglia. Solo il proprietario può farlo, e non
+// può rimuovere se stesso in questo modo (per lasciare/sciogliere la
+// famiglia serve un flusso diverso, non richiesto ora). Usa l'Admin SDK
+// per aggiornare anche users/{memberId}.familyId, campo che il membro
+// rimosso non potrebbe più scrivere da solo una volta perso l'accesso.
+exports.removeFamilyMember = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Devi essere autenticato.");
+  }
+  const {familyId, memberId} = request.data;
+  if (typeof familyId !== "string" || typeof memberId !== "string") {
+    throw new HttpsError(
+        "invalid-argument",
+        "familyId e memberId sono obbligatori.",
+    );
+  }
+
+  const familyRef = db.collection("families").doc(familyId);
+  const familyDoc = await familyRef.get();
+  if (!familyDoc.exists) {
+    throw new HttpsError("not-found", "Famiglia non trovata.");
+  }
+  if (familyDoc.data().ownerId !== request.auth.uid) {
+    throw new HttpsError(
+        "permission-denied",
+        "Solo il proprietario può rimuovere un membro.",
+    );
+  }
+  if (memberId === familyDoc.data().ownerId) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Il proprietario non può rimuovere se stesso.",
+    );
+  }
+
+  const memberRef = familyRef.collection("members").doc(memberId);
+  const memberDoc = await memberRef.get();
+  if (!memberDoc.exists) {
+    throw new HttpsError("not-found", "Membro non trovato.");
+  }
+
+  await memberRef.delete();
+  await db.collection("users").doc(memberId).set(
+      {familyId: FieldValue.delete()},
+      {merge: true},
+  );
+
+  return {message: "Membro rimosso dalla famiglia."};
+});
+
+// --- ATTIVAZIONE TRIAL SIMULATA (percorso di sviluppo/test in parallelo
+// all'acquisto reale via Google Play Billing) ---
+//
+// In precedenza il client scriveva isPremium/trialEnd/contatori
+// direttamente su Firestore. Questi campi sono ora bloccati in scrittura
+// dal client nelle Firestore Rules (solo Cloud Function/Admin SDK possono
+// scriverli), per evitare che un utente si auto-assegni Premium o resetti
+// i contatori d'uso modificando solo il client: il trial va quindi attivato
+// da qui, stesso comportamento di prima (15 giorni, contatori azzerati).
+
+exports.startTrial = onCall(async (request) => {
+  try {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Devi essere autenticato.");
+    }
+    const trialEnd = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+    await db.collection("users").doc(request.auth.uid).set(
+        {
+          isPremium: false,
+          trialEnd: trialEnd.toISOString(),
+          scontriniUsati: 0,
+          richiesteAiUsate: 0,
+          analisiAvanzateUsate: 0,
+        },
+        {merge: true},
+    );
+    return {trialEnd: trialEnd.toISOString()};
+  } catch (error) {
+    console.error("ERRORE START TRIAL:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", error.message);
+  }
 });
 
 // --- FASE 6: VERIFICA SERVER-SIDE ABBONAMENTO GOOGLE PLAY ---
