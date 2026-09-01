@@ -53,6 +53,57 @@ class _DelayedEntranceState extends State<DelayedEntrance> {
   }
 }
 
+/// Fa fluttuare [child] su e giù in loop continuo (leggero bob verticale +
+/// pulsazione di scala), per dare vita a un mascotte/icona statica senza
+/// serie di frame o librerie esterne — solo un `AnimationController` con
+/// `Tween` sinusoidale nativo Flutter.
+class FloatingBounce extends StatefulWidget {
+  const FloatingBounce({
+    super.key,
+    required this.child,
+    this.amplitude = 8,
+    this.duration = const Duration(milliseconds: 1800),
+  });
+
+  final Widget child;
+  final double amplitude;
+  final Duration duration;
+
+  @override
+  State<FloatingBounce> createState() => _FloatingBounceState();
+}
+
+class _FloatingBounceState extends State<FloatingBounce>
+    with SingleTickerProviderStateMixin {
+  late final _controller = AnimationController(
+    vsync: this,
+    duration: widget.duration,
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final t = Curves.easeInOut.transform(_controller.value);
+        final dy = widget.amplitude * (1 - t) - widget.amplitude / 2;
+        final scale = 1 + 0.04 * t;
+        return Transform.translate(
+          offset: Offset(0, dy),
+          child: Transform.scale(scale: scale, child: child),
+        );
+      },
+      child: widget.child,
+    );
+  }
+}
+
 /// Conta da 0 (o da [begin]) a [end] in [duration], richiamando [builder]
 /// ad ogni frame con il valore corrente — usarlo per "€0 → €2.400" o
 /// "0% → 50%". Riparte automaticamente se [end] cambia.

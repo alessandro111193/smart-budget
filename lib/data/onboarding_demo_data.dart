@@ -116,11 +116,28 @@ const demoChatMessages = [
 
 const demoAiPossibleSaving = 50.0;
 
+/// Elenco esteso delle funzionalità Premium mostrate nella schermata
+/// finale della demo, ognuna corrispondente a una funzionalità AI
+/// realmente implementata (vedi CLAUDE.md, "AI Premium — consulente
+/// personale", blocchi 1-9): mai una promessa non mantenuta dall'app.
+class DemoPremiumFeature {
+  final String emoji;
+  final String label;
+  const DemoPremiumFeature(this.emoji, this.label);
+}
+
 const demoPremiumFeatures = [
-  'AI avanzata',
-  'Consigli personalizzati',
-  'Analisi approfondite',
-  'Analisi delle abitudini',
-  'Funzioni Premium',
-  'Nessuna pubblicità',
+  DemoPremiumFeature('🤖', 'Consigli personalizzati'),
+  DemoPremiumFeature('💰', 'Come distribuire lo stipendio nelle buste'),
+  DemoPremiumFeature('📊', 'Analisi delle abitudini'),
+  DemoPremiumFeature('🔮', 'Previsioni di spesa'),
+  DemoPremiumFeature('💡', 'Suggerimenti per risparmiare'),
+  DemoPremiumFeature('🎯', 'Pianificazione degli obiettivi'),
+  DemoPremiumFeature('🏦', 'Gestione intelligente dei Sinking Funds'),
+  DemoPremiumFeature('👨‍👩‍👧', 'Analisi familiare'),
+  DemoPremiumFeature('🛒', 'Lista spesa intelligente'),
+  DemoPremiumFeature('🧾', 'Analisi avanzata degli scontrini'),
+  DemoPremiumFeature('💬', 'Chat con l\'assistente'),
+  DemoPremiumFeature('📈', 'Report mensili automatici'),
+  DemoPremiumFeature('🔔', 'Suggerimenti proattivi'),
 ];
