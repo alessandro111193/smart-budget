@@ -51,3 +51,6 @@ app.*.map.json
 .env.*
 !.env.example
 .secret.local
+
+# Firebase CLI local cache (hosting deploy state, non config di progetto)
+.firebase/
