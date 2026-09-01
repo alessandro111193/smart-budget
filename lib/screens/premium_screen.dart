@@ -150,8 +150,9 @@ class _PremiumScreenState extends State<PremiumScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Row(
                           children: [
-                            const Icon(
-                              Icons.check_circle,
+                            const AppIcon(
+                              HeroIcons.checkCircle,
+                              solid: true,
                               color: Colors.white,
                               size: 18,
                             ),

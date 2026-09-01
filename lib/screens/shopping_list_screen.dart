@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
 import '../models/app_user.dart';
@@ -6,6 +7,7 @@ import '../services/ai_service.dart';
 import '../services/analytics_service.dart';
 import '../services/firestore_service.dart';
 import '../models/expense.dart';
+import '../widgets/app_icons.dart';
 
 /// Suggerimento generato dallo storico acquisti: nessuna chiamata AI, solo
 /// analisi di frequenza sulle spese passate (disponibile anche su Free).
@@ -139,14 +141,14 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
               if (!hasAi) return const SizedBox.shrink();
               return IconButton(
                 tooltip: 'Lista della spesa con budget (AI)',
-                icon: const Icon(Icons.smart_toy_outlined, color: AppColors.primary),
+                icon: const AppIcon(HeroIcons.sparkles, color: AppColors.primary),
                 onPressed: _showBudgetDialog,
               );
             },
           ),
           IconButton(
             tooltip: 'Segna tutto da ricomprare',
-            icon: const Icon(Icons.refresh, color: AppColors.ink),
+            icon: const AppIcon(HeroIcons.arrowPath, color: AppColors.ink),
             onPressed: () => _service.clearShoppingListChecks(),
           ),
         ],
@@ -243,7 +245,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
           radius: 22,
           backgroundColor: AppColors.primary,
           child: IconButton(
-            icon: const Icon(Icons.add, color: Colors.white),
+            icon: const AppIcon(HeroIcons.plus, color: Colors.white),
             onPressed: _addManualItem,
           ),
         ),
@@ -281,7 +283,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
           ),
         ),
         secondary: IconButton(
-          icon: const Icon(Icons.close, size: 18, color: AppColors.neutral),
+          icon: const AppIcon(HeroIcons.xMark, size: 18, color: AppColors.neutral),
           onPressed: () => _service.removeManualShoppingItem(name),
         ),
         onChanged: (v) =>
@@ -478,7 +480,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
               const CircleAvatar(
                 radius: 14,
                 backgroundColor: AppColors.primary,
-                child: Icon(Icons.smart_toy, color: Colors.white, size: 14),
+                child: AppIcon(HeroIcons.sparkles, color: Colors.white, size: 14),
               ),
               const SizedBox(width: 8),
               const Expanded(
@@ -489,8 +491,8 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
               ),
               if (suggestion != null || _budgetError != null)
                 IconButton(
-                  icon: const Icon(
-                    Icons.close,
+                  icon: const AppIcon(
+                    HeroIcons.xMark,
                     size: 18,
                     color: AppColors.neutral,
                   ),

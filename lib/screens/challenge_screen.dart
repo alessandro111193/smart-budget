@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
 import '../models/challenge.dart';
 import '../models/envelope.dart';
 import '../services/firestore_service.dart';
+import '../widgets/app_icons.dart';
 
 class ChallengeScreen extends StatelessWidget {
   const ChallengeScreen({super.key});
@@ -39,7 +41,7 @@ class ChallengeScreen extends StatelessWidget {
       floatingActionButton: FloatingActionButton(
         backgroundColor: AppColors.primary,
         onPressed: () => _showNewChallengeSheet(context),
-        child: const Icon(Icons.add),
+        child: const AppIcon(HeroIcons.plus, color: Colors.white),
       ),
       body: StreamBuilder<List<Envelope>>(
         stream: _service.streamEnvelopes(),
@@ -152,8 +154,8 @@ class ChallengeScreen extends StatelessWidget {
                 CircleAvatar(
                   radius: 16,
                   backgroundColor: progressColor.withOpacity(0.12),
-                  child: Icon(
-                    isSaving ? Icons.savings_outlined : Icons.speed_outlined,
+                  child: AppIcon(
+                    isSaving ? HeroIcons.banknotes : HeroIcons.scale,
                     size: 16,
                     color: progressColor,
                   ),
@@ -169,8 +171,8 @@ class ChallengeScreen extends StatelessWidget {
                   ),
                 ),
                 if (c.limitExceeded)
-                  const Icon(
-                    Icons.warning_amber_rounded,
+                  const AppIcon(
+                    HeroIcons.exclamationTriangle,
                     color: AppColors.danger,
                     size: 20,
                   ),
@@ -364,8 +366,11 @@ class ChallengeScreen extends StatelessWidget {
                             const Duration(days: 364),
                           );
                         }),
-                        icon: const Icon(Icons.local_fire_department_outlined,
-                            size: 18),
+                        icon: const AppIcon(
+                          HeroIcons.fire,
+                          size: 18,
+                          color: AppColors.warning,
+                        ),
                         label: const Text(
                           'Usa il template: Sfida delle 52 settimane',
                           style: TextStyle(fontSize: 12),

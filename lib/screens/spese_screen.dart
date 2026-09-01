@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
 import '../models/expense.dart';
 import '../models/envelope.dart';
+import '../widgets/app_icons.dart';
 import 'new_expense_screen.dart';
 
 class SpeseScreen extends StatefulWidget {
@@ -27,7 +29,7 @@ class _SpeseScreenState extends State<SpeseScreen> {
           context,
           MaterialPageRoute(builder: (_) => const NewExpenseScreen()),
         ),
-        child: const Icon(Icons.add),
+        child: const AppIcon(HeroIcons.minusCircle, color: Colors.white),
       ),
       body: StreamBuilder<List<Envelope>>(
         stream: _service.streamEnvelopes(),

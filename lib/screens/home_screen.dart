@@ -62,9 +62,12 @@ class _HomeScreenState extends State<HomeScreen> {
               children: const [
                 Icon(Icons.account_balance_wallet, color: AppColors.primary),
                 SizedBox(width: 8),
-                Text(
-                  'Spesa Intelligente',
-                  style: TextStyle(color: AppColors.ink, fontSize: 17),
+                Flexible(
+                  child: Text(
+                    'Spesa Intelligente',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: AppColors.ink, fontSize: 17),
+                  ),
                 ),
               ],
             ),
@@ -172,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const CircleAvatar(
                     radius: 22,
                     backgroundColor: AppColors.primary,
-                    child: Icon(Icons.person, color: Colors.white),
+                    child: AppIcon(HeroIcons.userCircle, color: Colors.white),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -205,8 +208,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(
-                      Icons.edit_outlined,
+                    icon: const AppIcon(
+                      HeroIcons.pencilSquare,
                       size: 20,
                       color: AppColors.neutral,
                     ),
@@ -218,7 +221,10 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const Divider(height: 1),
             ListTile(
-              leading: const Icon(Icons.logout, color: AppColors.danger),
+              leading: const AppIcon(
+                HeroIcons.arrowRightOnRectangle,
+                color: AppColors.danger,
+              ),
               title: const Text(
                 'Esci',
                 style: TextStyle(
@@ -337,7 +343,12 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.star, color: AppColors.warning, size: 18),
+                  const AppIcon(
+                    HeroIcons.star,
+                    solid: true,
+                    color: AppColors.warning,
+                    size: 18,
+                  ),
                   const SizedBox(width: 8),
                   Column(
                     mainAxisSize: MainAxisSize.min,
@@ -572,8 +583,8 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         return Row(
           children: [
-            const Icon(
-              Icons.calendar_today_outlined,
+            const AppIcon(
+              HeroIcons.calendarDays,
               size: 14,
               color: AppColors.neutral,
             ),
@@ -590,8 +601,8 @@ class _HomeScreenState extends State<HomeScreen> {
             Expanded(
               child: Row(
                 children: [
-                  const Icon(
-                    Icons.flag_outlined,
+                  const AppIcon(
+                    HeroIcons.flag,
                     size: 14,
                     color: AppColors.neutral,
                   ),
@@ -916,10 +927,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       CircleAvatar(
                         radius: 10,
                         backgroundColor: color.withOpacity(0.15),
-                        child: Icon(
+                        child: AppIcon(
                           isDanger
-                              ? Icons.error_outline
-                              : Icons.warning_amber_rounded,
+                              ? HeroIcons.exclamationCircle
+                              : HeroIcons.exclamationTriangle,
                           size: 12,
                           color: color,
                         ),
@@ -982,8 +993,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ],
                 ),
-                child: const Icon(
-                  Icons.smart_toy,
+                child: const AppIcon(
+                  HeroIcons.sparkles,
                   color: AppColors.primary,
                   size: 20,
                 ),
@@ -1054,8 +1065,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                   ),
                                   SizedBox(width: 4),
-                                  Icon(
-                                    Icons.arrow_forward,
+                                  AppIcon(
+                                    HeroIcons.arrowRight,
                                     color: Colors.white,
                                     size: 12,
                                   ),
@@ -1174,7 +1185,7 @@ class _DailyTipContentState extends State<_DailyTipContent> {
                       ),
                     ),
                     SizedBox(width: 4),
-                    Icon(Icons.arrow_forward, color: Colors.white, size: 12),
+                    AppIcon(HeroIcons.arrowRight, color: Colors.white, size: 12),
                   ],
                 ),
               ),

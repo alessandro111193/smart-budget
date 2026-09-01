@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
 import '../models/app_user.dart';
@@ -7,6 +8,7 @@ import '../models/envelope.dart';
 import '../services/ai_service.dart';
 import '../services/firestore_service.dart';
 import '../services/habit_insights.dart';
+import '../widgets/app_icons.dart';
 
 class NewIncomeScreen extends StatefulWidget {
   const NewIncomeScreen({super.key});
@@ -312,8 +314,8 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                     const CircleAvatar(
                       radius: 14,
                       backgroundColor: AppColors.primary,
-                      child: Icon(
-                        Icons.smart_toy,
+                      child: AppIcon(
+                        HeroIcons.sparkles,
                         color: Colors.white,
                         size: 14,
                       ),
@@ -329,8 +331,8 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(
-                        Icons.close,
+                      icon: const AppIcon(
+                        HeroIcons.xMark,
                         size: 18,
                         color: AppColors.neutral,
                       ),
@@ -406,8 +408,8 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                             color: AppColors.primary,
                           ),
                         )
-                      : const Icon(
-                          Icons.smart_toy_outlined,
+                      : const AppIcon(
+                          HeroIcons.sparkles,
                           size: 18,
                           color: AppColors.primary,
                         ),

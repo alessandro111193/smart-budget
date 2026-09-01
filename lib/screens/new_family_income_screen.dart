@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
 import '../models/app_user.dart';
@@ -8,6 +9,7 @@ import '../services/ai_service.dart';
 import '../services/family_insights.dart';
 import '../services/family_service.dart';
 import '../services/firestore_service.dart';
+import '../widgets/app_icons.dart';
 
 class NewFamilyIncomeScreen extends StatefulWidget {
   final String familyId;
@@ -287,8 +289,8 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
                     const CircleAvatar(
                       radius: 14,
                       backgroundColor: AppColors.primary,
-                      child: Icon(
-                        Icons.smart_toy,
+                      child: AppIcon(
+                        HeroIcons.sparkles,
                         color: Colors.white,
                         size: 14,
                       ),
@@ -304,8 +306,8 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(
-                        Icons.close,
+                      icon: const AppIcon(
+                        HeroIcons.xMark,
                         size: 18,
                         color: AppColors.neutral,
                       ),
@@ -385,8 +387,8 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
                             color: AppColors.primary,
                           ),
                         )
-                      : const Icon(
-                          Icons.smart_toy_outlined,
+                      : const AppIcon(
+                          HeroIcons.sparkles,
                           size: 18,
                           color: AppColors.primary,
                         ),

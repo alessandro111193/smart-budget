@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
+import '../widgets/app_icons.dart';
 import '../services/firestore_service.dart';
 import '../services/ai_service.dart';
 import '../services/habit_insights.dart';
@@ -612,8 +614,8 @@ class _HabitAnalysisCardState extends State<_HabitAnalysisCard> {
                   const CircleAvatar(
                     radius: 14,
                     backgroundColor: AppColors.primary,
-                    child: Icon(
-                      Icons.smart_toy,
+                    child: AppIcon(
+                      HeroIcons.sparkles,
                       color: Colors.white,
                       size: 14,
                     ),
@@ -658,8 +660,8 @@ class _HabitAnalysisCardState extends State<_HabitAnalysisCard> {
                             color: AppColors.primary,
                           ),
                         )
-                      : const Icon(
-                          Icons.insights_outlined,
+                      : const AppIcon(
+                          HeroIcons.sparkles,
                           size: 18,
                           color: AppColors.primary,
                         ),

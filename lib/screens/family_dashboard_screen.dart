@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
 import '../models/app_user.dart';
@@ -10,6 +11,7 @@ import '../services/ai_service.dart';
 import '../services/family_insights.dart';
 import '../services/family_service.dart';
 import '../services/firestore_service.dart';
+import '../widgets/app_icons.dart';
 import 'new_family_envelope_screen.dart';
 import 'new_family_income_screen.dart';
 
@@ -99,7 +101,10 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
                                       ),
                                     ),
                                   ),
-                                  icon: const Icon(Icons.add),
+                                  icon: const AppIcon(
+                                    HeroIcons.plus,
+                                    color: AppColors.primary,
+                                  ),
                                   label: const Text('Nuova busta'),
                                 ),
                               ),
@@ -119,7 +124,10 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
                                       ),
                                     ),
                                   ),
-                                  icon: const Icon(Icons.add_card),
+                                  icon: const AppIcon(
+                                    HeroIcons.plusCircle,
+                                    color: AppColors.primary,
+                                  ),
                                   label: const Text('Nuova entrata'),
                                 ),
                               ),
@@ -398,8 +406,8 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
             ),
             IconButton(
-              icon: const Icon(
-                Icons.delete_outline,
+              icon: const AppIcon(
+                HeroIcons.trash,
                 color: AppColors.danger,
                 size: 20,
               ),
@@ -527,8 +535,8 @@ class _FamilyAnalysisCardState extends State<_FamilyAnalysisCard> {
                   const CircleAvatar(
                     radius: 14,
                     backgroundColor: AppColors.primary,
-                    child: Icon(
-                      Icons.smart_toy,
+                    child: AppIcon(
+                      HeroIcons.sparkles,
                       color: Colors.white,
                       size: 14,
                     ),
@@ -573,8 +581,8 @@ class _FamilyAnalysisCardState extends State<_FamilyAnalysisCard> {
                             color: AppColors.primary,
                           ),
                         )
-                      : const Icon(
-                          Icons.insights_outlined,
+                      : const AppIcon(
+                          HeroIcons.sparkles,
                           size: 18,
                           color: AppColors.primary,
                         ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../theme/app_theme.dart';
@@ -95,6 +96,17 @@ class _LoginScreenState extends State<LoginScreen> {
         // per tutti fino al prossimo riavvio).
         await credential.user?.updateDisplayName(name);
         await credential.user?.reload();
+      }
+      // Account nuovo di zecca: passa dal wizard di configurazione guidata
+      // (nome/entrate/buste/obiettivo) prima della Home reale. Un account
+      // che fa login qui (non registrazione) non viene mai toccato, quindi
+      // nessun utente esistente vede il wizard.
+      final uid = credential.user?.uid;
+      if (uid != null) {
+        await FirebaseFirestore.instance.collection('users').doc(uid).set(
+          {'setupCompleted': false},
+          SetOptions(merge: true),
+        );
       }
       AnalyticsService.logSignUp();
       // Rimosso Navigator.pushReplacement.

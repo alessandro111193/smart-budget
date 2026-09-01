@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
 import '../models/challenge.dart';
 import '../services/ai_service.dart';
 import '../services/firestore_service.dart';
 import '../services/habit_insights.dart';
+import '../widgets/app_icons.dart';
 
 class ChatMessage {
   final String text;
@@ -199,7 +201,11 @@ class _AiChatScreenState extends State<AiChatScreen> {
                   radius: 22,
                   backgroundColor: AppColors.primary,
                   child: IconButton(
-                    icon: const Icon(Icons.send, color: Colors.white, size: 18),
+                    icon: const AppIcon(
+                      HeroIcons.paperAirplane,
+                      color: Colors.white,
+                      size: 18,
+                    ),
                     onPressed: _sendMessage,
                   ),
                 ),
@@ -245,7 +251,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
         const CircleAvatar(
           radius: 14,
           backgroundColor: AppColors.primary,
-          child: Icon(Icons.smart_toy, color: Colors.white, size: 14),
+          child: AppIcon(HeroIcons.sparkles, color: Colors.white, size: 14),
         ),
         const SizedBox(width: 8),
         Flexible(child: bubble),
@@ -329,8 +335,8 @@ class _MonthlyReportCardState extends State<_MonthlyReportCard> {
                     const CircleAvatar(
                       radius: 14,
                       backgroundColor: AppColors.primary,
-                      child: Icon(
-                        Icons.insights,
+                      child: AppIcon(
+                        HeroIcons.sparkles,
                         color: Colors.white,
                         size: 14,
                       ),
@@ -346,8 +352,8 @@ class _MonthlyReportCardState extends State<_MonthlyReportCard> {
                       ),
                     ),
                     if (isFresh)
-                      Icon(
-                        _expanded ? Icons.expand_less : Icons.expand_more,
+                      AppIcon(
+                        _expanded ? HeroIcons.chevronUp : HeroIcons.chevronDown,
                         color: AppColors.neutral,
                       ),
                   ],
@@ -377,19 +383,19 @@ class _MonthlyReportCardState extends State<_MonthlyReportCard> {
                 if (_expanded) ...[
                   const SizedBox(height: 8),
                   _reportLine(
-                    Icons.trending_up,
+                    HeroIcons.arrowTrendingUp,
                     AppColors.primary,
                     cached.puntoDiForza,
                   ),
                   const SizedBox(height: 4),
                   _reportLine(
-                    Icons.warning_amber_rounded,
+                    HeroIcons.exclamationTriangle,
                     AppColors.warning,
                     cached.attenzione,
                   ),
                   const SizedBox(height: 4),
                   _reportLine(
-                    Icons.lightbulb_outline,
+                    HeroIcons.lightBulb,
                     AppColors.secondary,
                     cached.consiglio,
                   ),
@@ -402,12 +408,12 @@ class _MonthlyReportCardState extends State<_MonthlyReportCard> {
     );
   }
 
-  Widget _reportLine(IconData icon, Color color, String text) {
+  Widget _reportLine(HeroIcons icon, Color color, String text) {
     if (text.isEmpty) return const SizedBox.shrink();
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 14, color: color),
+        AppIcon(icon, size: 14, color: color),
         const SizedBox(width: 6),
         Expanded(child: Text(text, style: const TextStyle(fontSize: 12))),
       ],

@@ -190,6 +190,23 @@ class FirestoreService {
     AnalyticsService.logTrialStarted();
   }
 
+  /// Vero solo per un account appena creato dal wizard di configurazione
+  /// dell'onboarding (`setupCompleted: false` scritto da `login_screen.dart`
+  /// al momento della registrazione) finché non arriva a fine wizard.
+  /// Un account esistente, o creato prima di questa funzionalità, non ha
+  /// questo campo: il default `true` lo fa andare dritto alla Home reale,
+  /// senza rivedere il wizard.
+  Stream<bool> streamSetupCompleted() {
+    return _userDoc.snapshots().map((doc) {
+      final data = doc.data() as Map<String, dynamic>?;
+      return (data?['setupCompleted'] as bool?) ?? true;
+    });
+  }
+
+  Future<void> markSetupCompleted() {
+    return _userDoc.set({'setupCompleted': true}, SetOptions(merge: true));
+  }
+
   double totalBudget(List<Envelope> envelopes) =>
       envelopes.fold(0, (s, e) => s + e.budget);
 

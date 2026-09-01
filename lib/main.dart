@@ -9,9 +9,11 @@ import 'firebase_options.dart';
 import 'theme/app_theme.dart';
 import 'widgets/bottom_nav_shell.dart';
 import 'screens/login_screen.dart';
-import 'screens/onboarding_screen.dart';
+import 'screens/onboarding/onboarding_flow.dart';
+import 'screens/onboarding/setup/setup_flow.dart';
 import 'services/ad_service.dart';
 import 'services/analytics_service.dart';
+import 'services/firestore_service.dart';
 import 'services/onboarding_service.dart';
 
 // Metti questo a false quando vuoi testare contro Firebase vero
@@ -53,9 +55,15 @@ class SmartBudgetApp extends StatelessWidget {
   }
 }
 
-/// Decide cosa mostrare all'avvio: prima l'onboarding (una sola volta per
-/// dispositivo, anche prima del login), poi il normale flusso
-/// login/BottomNavShell in base allo stato di autenticazione.
+/// Decide cosa mostrare all'avvio, in ordine:
+/// 1. la mini demo interattiva (`OnboardingFlow`), una sola volta per
+///    dispositivo, anche prima del login;
+/// 2. login/registrazione (schermata esistente, riusata — non ne esiste
+///    una seconda);
+/// 3. per un account appena creato da qui, il wizard di configurazione
+///    reale (`SetupFlow`: nome/entrate/buste/obiettivo);
+/// 4. la Home reale, per tutti gli altri casi (account esistenti creati
+///    prima di questa funzionalità non vedono mai il wizard).
 class _RootGate extends StatefulWidget {
   const _RootGate();
 
@@ -80,7 +88,7 @@ class _RootGateState extends State<_RootGate> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (!_onboardingSeen!) {
-      return OnboardingScreen(
+      return OnboardingFlow(
         onDone: () => setState(() => _onboardingSeen = true),
       );
     }
@@ -92,10 +100,23 @@ class _RootGateState extends State<_RootGate> {
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        if (snapshot.hasData && snapshot.data != null) {
-          return const BottomNavShell();
+        if (!snapshot.hasData || snapshot.data == null) {
+          return const LoginScreen();
         }
-        return const LoginScreen();
+        return StreamBuilder<bool>(
+          stream: FirestoreService().streamSetupCompleted(),
+          builder: (context, setupSnapshot) {
+            if (setupSnapshot.connectionState == ConnectionState.waiting) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (setupSnapshot.data == false) {
+              return const SetupFlow();
+            }
+            return const BottomNavShell();
+          },
+        );
       },
     );
   }

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
 import '../models/envelope.dart';
+import '../widgets/app_icons.dart';
 import 'new_envelope_screen.dart';
 
 class BusteScreen extends StatelessWidget {
@@ -88,7 +90,7 @@ class BusteScreen extends StatelessWidget {
                             ),
                             const SizedBox(width: 8),
                             IconButton(
-                              icon: const Icon(Icons.edit_outlined),
+                              icon: const AppIcon(HeroIcons.pencilSquare),
                               tooltip: 'Modifica busta',
                               onPressed: () => Navigator.push(
                                 context,
@@ -99,8 +101,8 @@ class BusteScreen extends StatelessWidget {
                               ),
                             ),
                             IconButton(
-                              icon: const Icon(
-                                Icons.delete_outline,
+                              icon: const AppIcon(
+                                HeroIcons.trash,
                                 color: AppColors.danger,
                               ),
                               onPressed: () async {
@@ -152,7 +154,7 @@ class BusteScreen extends StatelessWidget {
                         builder: (_) => const NewEnvelopeScreen(),
                       ),
                     ),
-                    icon: const Icon(Icons.add),
+                    icon: const AppIcon(HeroIcons.plus, color: Colors.white),
                     label: const Text('Nuova busta'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
