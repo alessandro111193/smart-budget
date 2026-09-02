@@ -77,6 +77,75 @@ async function incrementAnalisiQuota(userRef) {
   );
 }
 
+// --- RATE LIMITING: contatore a finestra fissa su Firestore ---
+//
+// Indipendente dai contatori Premium/Trial sopra (che limitano il consumo
+// nel tempo, non la velocità): impedisce un numero eccessivo di chiamate
+// nello stesso breve periodo, per uid e/o per IP. Un documento per chiave
+// in rateLimits/{key}, mai letto/scritto dal client (bypassa le Firestore
+// Rules perché scritto solo con l'Admin SDK).
+
+/** Limiti per funzione: {maxCalls} chiamate ogni {windowMs} millisecondi. */
+const RATE_LIMITS = {
+  chatWithAssistant: {maxCalls: 5, windowMs: 60 * 1000},
+  scanReceipt: {maxCalls: 3, windowMs: 60 * 1000},
+  generateAiInsight: {maxCalls: 5, windowMs: 60 * 1000},
+  suggestIncomeDistribution: {maxCalls: 5, windowMs: 60 * 1000},
+  suggestShoppingList: {maxCalls: 5, windowMs: 60 * 1000},
+  // startTrial ha un limite più stretto perché un abuso realistico è la
+  // creazione rapida di molti account nuovi (uid sempre diversi): il
+  // limite per uid da solo non basterebbe, va combinato con quello per IP
+  // (vedi enforceStartTrialRateLimit più sotto).
+  startTrialByUid: {maxCalls: 3, windowMs: 60 * 60 * 1000},
+  startTrialByIp: {maxCalls: 5, windowMs: 60 * 60 * 1000},
+};
+
+/**
+ * Verifica e aggiorna un contatore a finestra fissa per la chiave data.
+ * Lancia HttpsError "resource-exhausted" se il limite è già stato
+ * raggiunto nella finestra corrente. Finestra fissa (non scorrevole): un
+ * piccolo "burst" al confine tra due finestre è possibile, accettato come
+ * compromesso per la semplicità di un contatore atomico su Firestore.
+ * @param {string} key Chiave univoca del contatore, es. "uid_scanReceipt".
+ * @param {{maxCalls: number, windowMs: number}} limit Limite da applicare.
+ */
+async function enforceRateLimit(key, limit) {
+  const ref = db.collection("rateLimits").doc(key);
+  const now = Date.now();
+  await db.runTransaction(async (tx) => {
+    const doc = await tx.get(ref);
+    const data = doc.exists ? doc.data() : null;
+    if (!data || now - data.windowStart >= limit.windowMs) {
+      tx.set(ref, {windowStart: now, count: 1});
+      return;
+    }
+    if (data.count >= limit.maxCalls) {
+      throw new HttpsError(
+          "resource-exhausted",
+          "Troppe richieste in poco tempo. Riprova tra qualche minuto.",
+      );
+    }
+    tx.update(ref, {count: FieldValue.increment(1)});
+  });
+}
+
+/**
+ * Rate limit combinato per startTrial: per uid (copre i retry legittimi
+ * dello stesso utente) e per IP (l'unica difesa efficace contro molti
+ * account nuovi creati rapidamente, dato che ognuno ha un uid diverso).
+ * @param {string} uid Uid dell'utente autenticato che chiama startTrial.
+ * @param {string} ip IP del chiamante (request.rawRequest.ip).
+ */
+async function enforceStartTrialRateLimit(uid, ip) {
+  await enforceRateLimit(`uid_${uid}_startTrial`, RATE_LIMITS.startTrialByUid);
+  if (ip) {
+    await enforceRateLimit(
+        `ip_${ip}_startTrial`,
+        RATE_LIMITS.startTrialByIp,
+    );
+  }
+}
+
 exports.chatWithAssistant = onCall({timeoutSeconds: 120}, async (request) => {
   try {
     // 1. Verifica autenticazione
@@ -84,6 +153,10 @@ exports.chatWithAssistant = onCall({timeoutSeconds: 120}, async (request) => {
       throw new HttpsError("unauthenticated", "Devi essere autenticato.");
     }
     const userId = request.auth.uid;
+    await enforceRateLimit(
+        `uid_${userId}_chatWithAssistant`,
+        RATE_LIMITS.chatWithAssistant,
+    );
     const userRef = db.collection("users").doc(userId);
     const userDoc = await userRef.get();
     const userData = userDoc.data() || {};
@@ -155,6 +228,10 @@ exports.scanReceipt = onCall({timeoutSeconds: 120}, async (request) => {
     }
 
     const userId = request.auth.uid;
+    await enforceRateLimit(
+        `uid_${userId}_scanReceipt`,
+        RATE_LIMITS.scanReceipt,
+    );
     const userRef = db.collection("users").doc(userId);
     const userDoc = await userRef.get();
     const userData = userDoc.data() || {};
@@ -481,6 +558,10 @@ exports.generateAiInsight = onCall({timeoutSeconds: 120}, async (request) => {
       throw new HttpsError("unauthenticated", "Devi essere autenticato.");
     }
     const userId = request.auth.uid;
+    await enforceRateLimit(
+        `uid_${userId}_generateAiInsight`,
+        RATE_LIMITS.generateAiInsight,
+    );
     const userRef = db.collection("users").doc(userId);
     const userDoc = await userRef.get();
     const userData = userDoc.data() || {};
@@ -669,6 +750,10 @@ exports.suggestIncomeDistribution = onCall(
           throw new HttpsError("unauthenticated", "Devi essere autenticato.");
         }
         const userId = request.auth.uid;
+        await enforceRateLimit(
+            `uid_${userId}_suggestIncomeDistribution`,
+            RATE_LIMITS.suggestIncomeDistribution,
+        );
         const userRef = db.collection("users").doc(userId);
         const userDoc = await userRef.get();
         const userData = userDoc.data() || {};
@@ -802,6 +887,10 @@ exports.suggestShoppingList = onCall(
           throw new HttpsError("unauthenticated", "Devi essere autenticato.");
         }
         const userId = request.auth.uid;
+        await enforceRateLimit(
+            `uid_${userId}_suggestShoppingList`,
+            RATE_LIMITS.suggestShoppingList,
+        );
         const userRef = db.collection("users").doc(userId);
         const userDoc = await userRef.get();
         const userData = userDoc.data() || {};
@@ -1060,6 +1149,10 @@ exports.startTrial = onCall(async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Devi essere autenticato.");
     }
+    await enforceStartTrialRateLimit(
+        request.auth.uid,
+        request.rawRequest && request.rawRequest.ip,
+    );
     const trialEnd = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
     await db.collection("users").doc(request.auth.uid).set(
         {
