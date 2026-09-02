@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 
 import 'setup_envelopes_step.dart';
 import 'setup_goal_step.dart';
+import 'setup_household_step.dart';
 import 'setup_income_step.dart';
 import 'setup_name_step.dart';
 import 'setup_transform_screen.dart';
 
-enum _SetupStep { name, income, envelopes, goal, transform }
+enum _SetupStep { name, income, household, envelopes, goal, transform }
 
 /// Configurazione reale guidata, mostrata solo agli account appena creati
 /// (vedi `FirestoreService.streamSetupCompleted`). Ogni passaggio salva
@@ -30,6 +31,11 @@ class _SetupFlowState extends State<SetupFlow> {
   /// proporzionare i budget suggeriti delle buste (0 se saltata).
   double _monthlyIncome = 0;
 
+  /// Numero di persone nel nucleo familiare (Fase E), usato per correggere
+  /// ulteriormente i budget suggeriti di alcune categorie (default 1, mai
+  /// scritto su Firestore — solo un moltiplicatore per il passaggio dopo).
+  int _householdSize = 1;
+
   void _goTo(_SetupStep step) => setState(() => _step = step);
 
   @override
@@ -45,12 +51,20 @@ class _SetupFlowState extends State<SetupFlow> {
           key: const ValueKey('income'),
           onNext: (amount) {
             _monthlyIncome = amount;
+            _goTo(_SetupStep.household);
+          },
+        ),
+        _SetupStep.household => SetupHouseholdStep(
+          key: const ValueKey('household'),
+          onNext: (size) {
+            _householdSize = size;
             _goTo(_SetupStep.envelopes);
           },
         ),
         _SetupStep.envelopes => SetupEnvelopesStep(
           key: const ValueKey('envelopes'),
           monthlyIncome: _monthlyIncome,
+          householdSize: _householdSize,
           onNext: () => _goTo(_SetupStep.goal),
         ),
         _SetupStep.goal => SetupGoalStep(

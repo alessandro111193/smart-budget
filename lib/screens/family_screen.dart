@@ -4,15 +4,20 @@ import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
 import '../services/family_service.dart';
+import '../services/firestore_service.dart';
+import '../models/app_user.dart';
 import '../models/family.dart';
 import '../widgets/app_icons.dart';
 import 'family_dashboard_screen.dart';
 import 'new_family_expense_screen.dart';
+import 'premium_screen.dart';
+import 'scan_family_receipt_screen.dart';
 
 class FamilyScreen extends StatelessWidget {
   FamilyScreen({super.key});
 
   final _service = FamilyService();
+  final _userService = FirestoreService();
 
   static InputDecoration _fieldDecoration({String? labelText}) {
     return InputDecoration(
@@ -263,6 +268,37 @@ class FamilyScreen extends StatelessWidget {
               ),
               label: const Text('Nuova spesa familiare'),
               style: _primaryButtonStyle(AppColors.warning),
+            ),
+            const SizedBox(height: 10),
+            StreamBuilder<AppUser>(
+              stream: _userService.streamUser(),
+              builder: (context, userSnapshot) {
+                final hasAi = userSnapshot.data?.hasAiAccess ?? false;
+                return ElevatedButton.icon(
+                  onPressed: () {
+                    if (hasAi) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              ScanFamilyReceiptScreen(familyId: familyId),
+                        ),
+                      );
+                    } else {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => PremiumScreen()),
+                      );
+                    }
+                  },
+                  icon: const AppIcon(
+                    HeroIcons.camera,
+                    color: Colors.white,
+                  ),
+                  label: const Text('Scansiona scontrino famiglia'),
+                  style: _primaryButtonStyle(AppColors.accent),
+                );
+              },
             ),
           ],
         );

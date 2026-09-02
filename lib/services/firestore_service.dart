@@ -7,6 +7,7 @@ import '../models/app_user.dart';
 import '../models/challenge.dart';
 import '../models/envelope.dart';
 import '../models/expense.dart';
+import '../models/recurring_expense.dart';
 import 'analytics_service.dart';
 
 class FirestoreService {
@@ -19,18 +20,46 @@ class FirestoreService {
 
   Stream<List<Envelope>> streamEnvelopes() {
     return _envelopes.snapshots().map(
-      (snapshot) => snapshot.docs
-          .map(
-            (doc) => Envelope(
-              id: doc.id,
-              name: doc['name'],
-              category: doc['category'],
-              budget: (doc['budget'] as num).toDouble(),
-              balance: (doc['balance'] as num).toDouble(),
-              icon: doc['icon'],
-            ),
-          )
-          .toList(),
+      (snapshot) => snapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return Envelope(
+          id: doc.id,
+          name: data['name'],
+          category: data['category'],
+          budget: (data['budget'] as num).toDouble(),
+          balance: (data['balance'] as num).toDouble(),
+          icon: data['icon'],
+          isGeneral: data['isGeneral'] == true,
+        );
+      }).toList(),
+    );
+  }
+
+  /// Restituisce l'id della busta "Spese generali" (la crea se non esiste
+  /// ancora, al più una per utente). Usata quando l'utente registra una
+  /// spesa senza scegliere una busta propria: nessun budget reale (budget
+  /// e balance partono da 0, il balance può scendere sotto zero man mano
+  /// che si spende — è lo stesso FieldValue.increment già usato per ogni
+  /// altra busta in addExpense), così da restare comunque un envelopeId
+  /// reale e non richiedere nessun caso speciale altrove nell'app
+  /// (statistiche, alert budget — questi ultimi già ignorano le buste con
+  /// budget <= 0).
+  Future<String> ensureGeneralEnvelope() async {
+    final existing = await _envelopes
+        .where('isGeneral', isEqualTo: true)
+        .limit(1)
+        .get();
+    if (existing.docs.isNotEmpty) return existing.docs.first.id;
+    return addEnvelope(
+      Envelope(
+        id: '',
+        name: 'Spese generali',
+        category: 'Spese generali',
+        budget: 0,
+        balance: 0,
+        icon: '📦',
+        isGeneral: true,
+      ),
     );
   }
 
@@ -41,6 +70,7 @@ class FirestoreService {
       'budget': e.budget,
       'balance': e.balance,
       'icon': e.icon,
+      'isGeneral': e.isGeneral,
     });
     AnalyticsService.logEnvelopeCreated(isFamily: false);
     return doc.id;
@@ -126,6 +156,57 @@ class FirestoreService {
           )
           .toList(),
     );
+  }
+
+  CollectionReference get _recurringExpenses =>
+      _db.collection('users').doc(userId).collection('recurringExpenses');
+
+  Stream<List<RecurringExpense>> streamRecurringExpenses() {
+    return _recurringExpenses.snapshots().map(
+      (snapshot) => snapshot.docs
+          .map(
+            (doc) => RecurringExpense.fromMap(
+              doc.id,
+              doc.data() as Map<String, dynamic>,
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  Future<void> addRecurringExpense(RecurringExpense r) {
+    return _recurringExpenses.add(r.toMap());
+  }
+
+  Future<void> updateRecurringExpense(RecurringExpense r) {
+    return _recurringExpenses.doc(r.id).update(r.toMap());
+  }
+
+  Future<void> deleteRecurringExpense(String id) {
+    return _recurringExpenses.doc(id).delete();
+  }
+
+  /// Unico punto in cui una spesa ricorrente diventa una spesa reale:
+  /// chiamato SOLO dopo un tap esplicito dell'utente sul promemoria in
+  /// Home, mai automaticamente. Riusa addExpense (stessa scrittura atomica
+  /// spesa+decremento saldo busta) e poi segna il mese corrente come già
+  /// confermato, così il promemoria non ricompare fino al mese prossimo.
+  Future<void> confirmRecurringExpense(RecurringExpense r) async {
+    await addExpense(
+      Expense(
+        id: '',
+        amount: r.amount,
+        category: r.description,
+        envelopeId: r.envelopeId,
+        description: r.description,
+        date: DateTime.now(),
+      ),
+    );
+    final now = DateTime.now();
+    final monthKey = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    await _recurringExpenses.doc(r.id).update({
+      'lastGeneratedMonthKey': monthKey,
+    });
   }
 
   CollectionReference get _challenges =>

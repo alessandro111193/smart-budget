@@ -51,7 +51,7 @@ class _NewEnvelopeScreenState extends State<NewEnvelopeScreen> {
               controller: _budgetController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: 'Budget mensile (€)',
+                labelText: 'Budget mensile (€) — opzionale',
               ),
             ),
             const SizedBox(height: 16),
@@ -75,7 +75,7 @@ class _NewEnvelopeScreenState extends State<NewEnvelopeScreen> {
             ElevatedButton(
               onPressed: () async {
                 final budget = double.tryParse(_budgetController.text) ?? 0;
-                if (_nameController.text.isEmpty || budget <= 0) return;
+                if (_nameController.text.isEmpty || budget < 0) return;
                 if (_isEditing) {
                   await _service.updateEnvelope(
                     widget.envelope!.id,

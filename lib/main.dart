@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -26,6 +27,19 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
+  // Su web (incluso il target usato dalla PWA su iOS) il SDK sceglie da solo
+  // la persistenza migliore disponibile, ma può degradare in silenzio a
+  // "solo in memoria" (login perso ad ogni riapertura) in contesti dove
+  // IndexedDB è ristretto — richiederla esplicitamente evita quel fallback
+  // silenzioso. Non è garantito risolva del tutto il problema su iPhone:
+  // Safari/WebKit hanno una storia nota di trattare la storage di una PWA
+  // aggiunta alla schermata Home in modo separato e più volatile rispetto a
+  // Safari normale, un limite della piattaforma non testabile da qui (nessun
+  // dispositivo iOS reale in questo ambiente).
+  if (kIsWeb) {
+    await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
+  }
+
   // Gli emulatori si collegano SOLO in debug locale, MAI in una build release.
   // Così puoi continuare a sviluppare offline, ma un tester che installa
   // l'APK release parlerà sempre con Firebase vero, non con il tuo localhost.
@@ -51,6 +65,13 @@ class SmartBudgetApp extends StatelessWidget {
       theme: AppTheme.light(),
       home: const _RootGate(),
       debugShowCheckedModeBanner: false,
+      locale: const Locale('it'),
+      supportedLocales: const [Locale('it')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
     );
   }
 }

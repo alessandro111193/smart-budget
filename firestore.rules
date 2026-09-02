@@ -2,6 +2,21 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Regola dedicata per la query collectionGroup('invites') del
+    // destinatario (streamMyPendingInvites in family_service.dart): un
+    // match annidato (families/{familyId}/invites/{inviteId}, più sotto)
+    // governa correttamente get/create/update/delete su un documento
+    // preciso, ma Firestore NON lo considera mai per una query
+    // collectionGroup — per quello serve un match dichiarato con
+    // {path=**} a questo livello. Confermato con un test end-to-end reale
+    // (prima con isOwner()+email, poi con l'uid: entrambi restavano
+    // "permission-denied" finché la regola non è stata spostata qui) e poi
+    // riprodotto/verificato in modo isolato sull'emulatore Firestore.
+    match /{path=**}/invites/{inviteId} {
+      allow list: if request.auth != null &&
+        resource.data.invitedUid == request.auth.uid;
+    }
+
     match /users/{userId} {
       function isSelf() {
         return request.auth != null && request.auth.uid == userId;
@@ -38,6 +53,19 @@ service cloud.firestore {
       match /challenges/{challengeId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
+      match /recurringExpenses/{recurringExpenseId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      match /notifications/{notificationId} {
+        // Scritte solo dalle Cloud Function (Admin SDK, sendPushAndLog in
+        // functions/index.js) — il client legge lo storico e può solo
+        // segnare una notifica come letta, mai crearne/eliminarne una
+        // propria (sarebbe una notifica finta, mai davvero inviata).
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow update: if request.auth != null && request.auth.uid == userId &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['read']);
+      }
     }
 
     match /families/{familyId} {
@@ -67,13 +95,18 @@ service cloud.firestore {
       }
 
       match /invites/{inviteId} {
-        allow read: if request.auth != null &&
-          (resource.data.email == request.auth.token.email || isOwner());
+        // list() (query collectionGroup del destinatario) è dichiarata a
+        // parte, in un match top-level {path=**} in cima al file — vedi
+        // commento lì: Firestore non applica un match annidato come questo
+        // a una query collectionGroup, solo a get/create/update/delete su
+        // un path preciso, per cui qui restano solo queste ultime quattro.
+        allow get: if request.auth != null &&
+          (resource.data.invitedUid == request.auth.uid || isOwner());
         allow create: if isOwner();
         // Il destinatario può solo cambiare lo stato dell'invito (es.
-        // accettarlo), mai altri campi come l'email a cui è destinato.
+        // accettarlo), mai altri campi come l'email/uid a cui è destinato.
         allow update: if request.auth != null &&
-          resource.data.email == request.auth.token.email &&
+          resource.data.invitedUid == request.auth.uid &&
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['status']);
         allow delete: if isOwner();

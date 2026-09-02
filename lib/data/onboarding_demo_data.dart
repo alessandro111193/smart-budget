@@ -22,7 +22,7 @@ const demoEnvelopes = [
   DemoEnvelope('Famiglia', 300, CategoryType.famiglia),
   DemoEnvelope('Risparmio', 500, CategoryType.risparmio),
   DemoEnvelope('Svago', 200, CategoryType.svago),
-  DemoEnvelope('Buffer', 100, CategoryType.altro),
+  DemoEnvelope('Fondo imprevisti', 100, CategoryType.altro),
 ];
 
 class DemoTransaction {
@@ -90,9 +90,9 @@ class DemoFamilyMember {
 }
 
 const demoFamilyMembers = [
-  DemoFamilyMember('Alessandro', 'Entrate', 2400),
-  DemoFamilyMember('Moglie', 'Spese personali', 120),
-  DemoFamilyMember('Figlio', 'Scuola', 65),
+  DemoFamilyMember('Alessandro (Padre)', 'Entrate', 2400),
+  DemoFamilyMember('Selene (Moglie)', 'Spese personali', 120),
+  DemoFamilyMember('Paolo (Figlio)', 'Scuola', 65),
 ];
 
 class DemoChatMessage {

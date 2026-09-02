@@ -37,6 +37,21 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // Minificazione disattivata esplicitamente: senza regole ProGuard
+            // dedicate, R8 rimuoveva le classi generate da Room/WorkManager
+            // usate da firebase_messaging, causando un crash immediato
+            // all'avvio ("Failed to create an instance of
+            // androidx.work.impl.WorkDatabase", schermata bianca che sparisce
+            // subito). proguard-rules.pro protegge già Room/WorkManager per
+            // quando si vorrà riattivare la minificazione prima della
+            // pubblicazione (serve comunque una build/test reali per
+            // riverificare, non eseguibili in questo ambiente).
+            isMinifyEnabled = false
+            isShrinkResources = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }

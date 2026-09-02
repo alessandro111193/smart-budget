@@ -72,5 +72,14 @@
 	     pubblicazione su App Store. -->
 	<key>GADApplicationIdentifier</key>
 	<string>ca-app-pub-3940256099942544~1458002511</string>
+	<!-- Notifiche push in background (Firebase Cloud Messaging). Plumbing
+	     pronto ma non operativo su iOS finché non è configurata una chiave
+	     APNs reale in Apple Developer + Firebase Console (TODO(apns-config),
+	     stesso pattern di Play Billing/AdMob in CLAUDE.md: bloccato in
+	     attesa di una tua configurazione esterna, non eseguibile da qui). -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 </dict>
 </plist>

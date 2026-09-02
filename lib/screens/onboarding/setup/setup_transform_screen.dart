@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -5,6 +7,7 @@ import '../../../models/challenge.dart';
 import '../../../models/envelope.dart';
 import '../../../models/income.dart';
 import '../../../services/firestore_service.dart';
+import '../../../services/notification_service.dart';
 import '../../../theme/icon_palette.dart';
 import '../../../widgets/onboarding/onboarding_animations.dart';
 import '../../../widgets/onboarding/onboarding_widgets.dart';
@@ -29,6 +32,10 @@ class _SetupTransformScreenState extends State<SetupTransformScreen> {
   Future<void> _finish() async {
     setState(() => _finishing = true);
     await _service.markSetupCompleted();
+    // Richiesta permesso notifiche qui, non al primissimo avvio (subito
+    // dopo l'onboarding demo, prima ancora della registrazione, sarebbe
+    // stato troppo presto) — fire-and-forget, non blocca la navigazione.
+    unawaited(NotificationService.requestPermissionOnceIfNeeded());
     // _RootGate riascolta streamSetupCompleted() e mostra da solo la Home
     // reale: non serve navigare manualmente da qui.
   }

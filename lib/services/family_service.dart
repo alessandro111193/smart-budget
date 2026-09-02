@@ -87,10 +87,17 @@ class FamilyService {
 
   /// Inviti pendenti per l'email dell'utente corrente, cercati fra tutte le famiglie
   Stream<List<Map<String, dynamic>>> streamMyPendingInvites() {
-    if (userEmail == null) return const Stream.empty();
+    if (userId.isEmpty) return const Stream.empty();
+    // Confronto sull'uid, non sull'email: è l'unica forma che Firestore può
+    // "dimostrare" per una query collectionGroup (vedi commento sulla stessa
+    // logica in functions/index.js, inviteFamilyMember) — un confronto su
+    // resource.data.email, anche già normalizzato in minuscolo, veniva
+    // rifiutato in blocco con permission-denied indipendentemente dai dati,
+    // perché la regola precedente lo combinava in OR con isOwner() (un
+    // get() su un segmento di path variabile, non provabile per una list()).
     return _db
         .collectionGroup('invites')
-        .where('email', isEqualTo: userEmail)
+        .where('invitedUid', isEqualTo: userId)
         .where('status', isEqualTo: 'pending')
         .snapshots()
         .map(
@@ -152,8 +159,8 @@ class FamilyService {
     );
   }
 
-  Future<void> addFamilyEnvelope(String familyId, Envelope e) async {
-    await _familyEnvelopes(familyId).add({
+  Future<String> addFamilyEnvelope(String familyId, Envelope e) async {
+    final doc = await _familyEnvelopes(familyId).add({
       'name': e.name,
       'category': e.category,
       'budget': e.budget,
@@ -161,6 +168,7 @@ class FamilyService {
       'icon': e.icon,
     });
     AnalyticsService.logEnvelopeCreated(isFamily: true);
+    return doc.id;
   }
 
   /// Stesso comportamento di FirestoreService.updateEnvelope: il saldo

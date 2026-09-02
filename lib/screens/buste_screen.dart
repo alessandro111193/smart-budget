@@ -77,7 +77,9 @@ class BusteScreen extends StatelessWidget {
                         ),
                         title: Text(e.name),
                         subtitle: Text(
-                          'Budget: €${e.budget.toStringAsFixed(2)}',
+                          e.budget == 0
+                              ? 'Nessun budget impostato'
+                              : 'Budget: €${e.budget.toStringAsFixed(2)}',
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,

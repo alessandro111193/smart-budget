@@ -97,6 +97,12 @@ class _LoginScreenState extends State<LoginScreen> {
         await credential.user?.updateDisplayName(name);
         await credential.user?.reload();
       }
+      // Email di verifica: gratuita, inviata dal sistema email integrato di
+      // Firebase Auth (nessun servizio esterno, nessuna configurazione
+      // aggiuntiva). Non blocca l'accesso all'app — l'utente resta
+      // operativo anche prima di verificarla, il banner in Home glielo
+      // ricorda finché non lo fa.
+      await credential.user?.sendEmailVerification();
       // Account nuovo di zecca: passa dal wizard di configurazione guidata
       // (nome/entrate/buste/obiettivo) prima della Home reale. Un account
       // che fa login qui (non registrazione) non viene mai toccato, quindi

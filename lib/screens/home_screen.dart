@@ -7,13 +7,17 @@ import '../theme/icon_palette.dart';
 import '../services/firestore_service.dart';
 import '../services/budget_insights.dart';
 import '../services/ai_service.dart';
+import '../services/notification_service.dart';
+import '../services/family_service.dart';
 import '../models/envelope.dart';
 import '../models/expense.dart';
 import '../models/income.dart';
 import '../models/challenge.dart';
 import '../models/app_user.dart';
+import '../models/recurring_expense.dart';
 import 'new_expense_screen.dart';
 import 'new_income_screen.dart';
+import 'recurring_expenses_screen.dart';
 import 'ai_chat_screen.dart';
 import 'premium_screen.dart';
 import 'buste_screen.dart';
@@ -22,6 +26,7 @@ import 'challenge_screen.dart';
 import 'family_screen.dart';
 import 'scan_receipt_screen.dart';
 import 'shopping_list_screen.dart';
+import 'notifications_screen.dart';
 import '../widgets/app_icons.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -33,6 +38,16 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _service = FirestoreService();
+
+  @override
+  void initState() {
+    super.initState();
+    // Per un account che ha già completato il setup (quindi non passa da
+    // SetupTransformScreen, unico altro punto da cui viene richiesto): il
+    // flag interno di NotificationService garantisce comunque un solo
+    // prompt per dispositivo, mai ad ogni apertura della Home.
+    NotificationService.requestPermissionOnceIfNeeded();
+  }
 
   void _refresh() {
     setState(() {});
@@ -74,6 +89,7 @@ class _HomeScreenState extends State<HomeScreen> {
             backgroundColor: Colors.white,
             elevation: 0,
             actions: [
+              const _NotificationsBellButton(),
               IconButton(
                 icon: const AppIcon(
                   HeroIcons.users,
@@ -118,6 +134,7 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.all(16),
             children: [
               _greetingRow(),
+              const _EmailVerificationBanner(),
               const SizedBox(height: 16),
               StreamBuilder<List<Income>>(
                 stream: _service.streamIncomes(),
@@ -145,6 +162,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ...envelopes.take(4).map((e) => _envelopeTile(e)),
               const SizedBox(height: 8),
               _budgetAlertsCard(envelopes),
+              const SizedBox(height: 8),
+              _recurringExpensesDueCard(),
               const SizedBox(height: 8),
               _aiInsightCard(context),
             ],
@@ -218,6 +237,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
               ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const AppIcon(HeroIcons.arrowPath),
+              title: const Text('Spese ricorrenti'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const RecurringExpensesScreen(),
+                  ),
+                );
+              },
             ),
             const Divider(height: 1),
             ListTile(
@@ -953,6 +986,72 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Promemoria per le spese fisse ricorrenti (Mutuo, Affitto, ecc.,
+  /// gestite in RecurringExpensesScreen) dovute questo mese e non ancora
+  /// confermate — Fase D del giro di correzioni post-audit. Nessuna
+  /// registrazione automatica: la spesa reale viene creata solo dopo il
+  /// tap su "Registra" qui sotto (FirestoreService.confirmRecurringExpense),
+  /// mai da sola.
+  Widget _recurringExpensesDueCard() {
+    return StreamBuilder<List<RecurringExpense>>(
+      stream: _service.streamRecurringExpenses(),
+      builder: (context, snapshot) {
+        final now = DateTime.now();
+        final due = (snapshot.data ?? [])
+            .where((r) => r.isDueOn(now))
+            .toList();
+        if (due.isEmpty) return const SizedBox.shrink();
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Spese ricorrenti da confermare',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+              ...due.map((r) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${r.description} · €${r.amount.toStringAsFixed(2)}',
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () =>
+                            _service.confirmRecurringExpense(r),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppColors.primary,
+                          padding: EdgeInsets.zero,
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text(
+                          'Registra',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   /// Su Free mostra l'invito al trial (invariato). Su Premium/Trial mostra
   /// il "Consiglio di oggi" reale, generato una volta al giorno dalla
   /// Cloud Function generateAiInsight e servito dalla cache per il resto
@@ -1081,6 +1180,162 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Icona campanella con un pallino rosso quando c'è qualcosa da vedere: un
+/// invito famiglia pendente (prima invisibile ovunque fuori dalla schermata
+/// Famiglia, mai raggiunta finché non si sa già che serve andarci) o una
+/// notifica non letta. Combina due stream indipendenti (inviti/notifiche,
+/// collection diverse) solo per decidere se mostrare il pallino — l'elenco
+/// resta comunque quello reale di NotificationsScreen al tap.
+class _NotificationsBellButton extends StatelessWidget {
+  const _NotificationsBellButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: FamilyService().streamMyPendingInvites(),
+      builder: (context, invitesSnapshot) {
+        final hasPendingInvite = (invitesSnapshot.data ?? []).isNotEmpty;
+        return StreamBuilder<List<AppNotification>>(
+          stream: NotificationService.streamNotifications(),
+          builder: (context, notifSnapshot) {
+            final hasUnread =
+                (notifSnapshot.data ?? []).any((n) => !n.read);
+            final showDot = hasPendingInvite || hasUnread;
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                IconButton(
+                  icon: const AppIcon(
+                    HeroIcons.bell,
+                    color: IconPalette.testo,
+                  ),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const NotificationsScreen(),
+                      ),
+                    );
+                  },
+                ),
+                if (showDot)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Container(
+                      width: 9,
+                      height: 9,
+                      decoration: const BoxDecoration(
+                        color: AppColors.danger,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+/// Banner "verifica la tua email", visibile finché l'account non è
+/// verificato. L'email di verifica parte da sola alla registrazione
+/// (login_screen.dart, sendEmailVerification — gratuita, sistema email
+/// integrato di Firebase Auth, nessun servizio esterno) — questo banner
+/// serve solo a ricordarlo e a permettere di reinviarla, mai a bloccare
+/// l'uso dell'app nel frattempo (nessun account esistente creato prima di
+/// questa funzionalità ha mai verificato l'email, quindi bloccare l'accesso
+/// li spezzerebbe tutti).
+class _EmailVerificationBanner extends StatefulWidget {
+  const _EmailVerificationBanner();
+
+  @override
+  State<_EmailVerificationBanner> createState() =>
+      _EmailVerificationBannerState();
+}
+
+class _EmailVerificationBannerState extends State<_EmailVerificationBanner> {
+  bool _verified = FirebaseAuth.instance.currentUser?.emailVerified ?? true;
+  bool _sending = false;
+  bool _checking = false;
+  String? _message;
+
+  Future<void> _resend() async {
+    setState(() {
+      _sending = true;
+      _message = null;
+    });
+    try {
+      await FirebaseAuth.instance.currentUser?.sendEmailVerification();
+      if (mounted) setState(() => _message = 'Email inviata di nuovo.');
+    } catch (e) {
+      if (mounted) setState(() => _message = 'Errore: $e');
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _recheck() async {
+    setState(() => _checking = true);
+    // reload() e' l'unico modo per sapere se l'utente ha verificato
+    // l'email nel frattempo: Firebase non lo notifica in tempo reale.
+    await FirebaseAuth.instance.currentUser?.reload();
+    if (mounted) {
+      setState(() {
+        _verified = FirebaseAuth.instance.currentUser?.emailVerified ?? true;
+        _checking = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_verified) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Verifica la tua email',
+            style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.ink),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Ti abbiamo mandato un link di conferma. Controlla la posta e '
+            'poi torna qui.',
+            style: TextStyle(fontSize: 12, color: AppColors.neutral),
+          ),
+          if (_message != null) ...[
+            const SizedBox(height: 6),
+            Text(_message!, style: const TextStyle(fontSize: 12, color: AppColors.primary)),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              TextButton(
+                onPressed: _sending ? null : _resend,
+                child: Text(_sending ? 'Invio...' : 'Invia di nuovo'),
+              ),
+              TextButton(
+                onPressed: _checking ? null : _recheck,
+                child: Text(_checking ? 'Verifico...' : 'Ho verificato'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

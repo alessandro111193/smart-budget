@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
+import '../models/app_user.dart';
 import '../models/challenge.dart';
 import '../services/ai_service.dart';
 import '../services/firestore_service.dart';
 import '../services/habit_insights.dart';
 import '../widgets/app_icons.dart';
+import '../widgets/trial_quota_badge.dart';
 
 class ChatMessage {
   final String text;
@@ -145,6 +147,14 @@ class _AiChatScreenState extends State<AiChatScreen> {
       ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: TrialQuotaBadge(
+              used: (u) => u.richiesteAiUsate,
+              max: AppUser.trialMaxRichiesteAi,
+              label: 'Richieste AI',
+            ),
+          ),
           const _MonthlyReportCard(),
           Expanded(
             child: _messages.isEmpty

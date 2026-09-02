@@ -6,10 +6,11 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 
 import '../theme/app_theme.dart';
 import '../services/ai_service.dart';
-import '../services/firestore_service.dart';
+import '../services/family_service.dart';
 import '../models/app_user.dart';
 import '../models/envelope.dart';
-import '../models/expense.dart';
+import '../models/family.dart';
+import '../models/family_expense.dart';
 import '../widgets/trial_quota_badge.dart';
 
 enum _PhotoMode { receiptOnly, productsOnly, both }
@@ -23,30 +24,46 @@ const _categorie = [
   'Altro',
 ];
 
-class ScanReceiptScreen extends StatefulWidget {
-  const ScanReceiptScreen({super.key});
+/// Scanner scontrino/prodotti per il flusso di spesa familiare (Fase F del
+/// piano post-beta). Stessa Cloud Function `scanReceipt` già usata dallo
+/// scanner personale (`scan_receipt_screen.dart`), qui abbinata alle buste
+/// familiari invece che a quelle personali. Premium/Trial: il gate reale è
+/// server-side dentro `scanReceipt` (verificato sull'utente personale che
+/// chiama, non sulla famiglia — stesso pattern già in uso per l'analisi AI
+/// famiglia), l'accesso a questa schermata è comunque già filtrato dal
+/// bottone che la apre in `family_screen.dart`.
+///
+/// A differenza dello scanner personale: nessuna busta "Spese generali"
+/// (mai introdotta per le buste familiari, scelta di scope del Block 2) e
+/// il tipo di spesa familiare (condivisa/personale) si sceglie una sola
+/// volta per l'intero scontrino, non prodotto per prodotto — un'unica spesa
+/// al supermercato ha senso averla con lo stesso "chi paga" per ogni riga.
+/// La modalità "ripartita" non è supportata qui: richiederebbe percentuali
+/// per ogni singolo prodotto, sproporzionato per una spesa a scontrino;
+/// resta disponibile con il form manuale (`new_family_expense_screen.dart`).
+class ScanFamilyReceiptScreen extends StatefulWidget {
+  final String familyId;
+  const ScanFamilyReceiptScreen({super.key, required this.familyId});
 
   @override
-  State<ScanReceiptScreen> createState() => _ScanReceiptScreenState();
+  State<ScanFamilyReceiptScreen> createState() =>
+      _ScanFamilyReceiptScreenState();
 }
 
-class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
+class _ScanFamilyReceiptScreenState extends State<ScanFamilyReceiptScreen> {
   final _aiService = AiService();
-  final _firestoreService = FirestoreService();
+  final _familyService = FamilyService();
 
   _PhotoMode _mode = _PhotoMode.receiptOnly;
   Uint8List? _receiptBytes;
   Uint8List? _productsBytes;
 
+  FamilyExpenseType _type = FamilyExpenseType.shared;
+  String? _selectedMemberId;
+
   bool _loading = false;
   List<Map<String, dynamic>> _products = [];
   String? _error;
-
-  /// Media storica di spesa per categoria (solo Dart/Firestore, zero
-  /// costo AI): calcolata dopo lo scan per confrontarla con il totale di
-  /// questo scontrino, categoria per categoria. Non tocca in alcun modo
-  /// la conferma manuale già esistente.
-  Map<String, double> _historicalAverageByCategory = {};
 
   bool get _needsReceipt =>
       _mode == _PhotoMode.receiptOnly || _mode == _PhotoMode.both;
@@ -57,9 +74,6 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
       (!_needsReceipt || _receiptBytes != null) &&
       (!_needsProducts || _productsBytes != null);
 
-  // Usa XFile.readAsBytes() + compressWithList (non compressWithFile) perché
-  // su web il path di XFile è un blob URL: dart:io.File non lo apre e
-  // compressWithFile non è implementato sul target web.
   Future<Uint8List?> _pickCompressed(ImageSource source) async {
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: source, imageQuality: 85);
@@ -98,7 +112,8 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
       _error = null;
     });
     try {
-      final envelopes = await _firestoreService.streamEnvelopes().first;
+      final envelopes =
+          await _familyService.streamFamilyEnvelopes(widget.familyId).first;
       final result = await _aiService.scanReceipt(
         receiptImageBytes: _needsReceipt ? _receiptBytes : null,
         productsImageBytes: _needsProducts ? _productsBytes : null,
@@ -129,19 +144,7 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
         };
       }).toList();
 
-      // Se l'utente non ha ancora nessuna busta, non possiamo chiedergli
-      // dove salvare: ne creiamo una per categoria trovata, con budget
-      // pari a quanto speso in quella categoria in questo scontrino.
-      if (envelopes.isEmpty && products.isNotEmpty) {
-        await _createEnvelopesForProducts(products);
-      }
-
-      final historicalAverages = await _computeHistoricalAverages(products);
-
-      setState(() {
-        _products = products;
-        _historicalAverageByCategory = historicalAverages;
-      });
+      setState(() => _products = products);
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -149,169 +152,119 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
     }
   }
 
-  static const _categoryIcons = {
-    'Spesa': '🛒',
-    'Casa': '🏠',
-    'Trasporti': '🚗',
-    'Salute': '💊',
-    'Svago': '🎉',
-    'Altro': '💰',
-  };
-
-  Future<void> _createEnvelopesForProducts(
-    List<Map<String, dynamic>> products,
-  ) async {
-    final totals = <String, double>{};
-    for (final p in products) {
-      final categoria = p['categoria'] as String;
-      final prezzo = (p['prezzo'] as double?) ?? 0;
-      final quantita = (p['quantita'] as int?) ?? 1;
-      totals[categoria] = (totals[categoria] ?? 0) + prezzo * quantita;
-    }
-    final newIds = <String, String>{};
-    for (final entry in totals.entries) {
-      newIds[entry.key] = await _firestoreService.addEnvelope(
-        Envelope(
-          id: '',
-          name: entry.key,
-          category: entry.key,
-          budget: entry.value,
-          balance: entry.value,
-          icon: _categoryIcons[entry.key] ?? '💰',
-        ),
-      );
-    }
-    for (final p in products) {
-      p['envelopeId'] = newIds[p['categoria']];
-    }
-  }
-
-  /// Punto 11 del piano AI Premium: confronta il totale di questo
-  /// scontrino, categoria per categoria, con la media storica delle spese
-  /// già registrate in quella categoria. Solo Dart/Firestore, zero
-  /// chiamate AI — non cambia in nulla il flusso di conferma manuale.
-  Future<Map<String, double>> _computeHistoricalAverages(
-    List<Map<String, dynamic>> products,
-  ) async {
-    final scannedCategories = products
-        .map((p) => p['categoria'] as String)
-        .toSet();
-    if (scannedCategories.isEmpty) return {};
-
-    final pastExpenses = await _firestoreService.streamExpenses().first;
-    final sums = <String, double>{};
-    final counts = <String, int>{};
-    for (final e in pastExpenses) {
-      if (!scannedCategories.contains(e.category)) continue;
-      sums[e.category] = (sums[e.category] ?? 0) + e.amount;
-      counts[e.category] = (counts[e.category] ?? 0) + 1;
-    }
-
-    return {
-      for (final category in sums.keys) category: sums[category]! / counts[category]!,
-    };
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          'Scanner scontrino',
+          'Scanner scontrino famiglia',
           style: TextStyle(color: AppColors.ink, fontSize: 17),
         ),
         backgroundColor: Colors.white,
         elevation: 0,
         iconTheme: const IconThemeData(color: AppColors.ink),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TrialQuotaBadge(
-              used: (u) => u.scontriniUsati,
-              max: AppUser.trialMaxScontrini,
-              label: 'Scontrini',
-            ),
-            _modeSelector(),
-            const SizedBox(height: 16),
-            if (_needsReceipt)
-              _photoSlot(
-                label: 'Foto scontrino',
-                bytes: _receiptBytes,
-                onPick: _pickReceipt,
-              ),
-            if (_needsReceipt && _needsProducts) const SizedBox(height: 12),
-            if (_needsProducts)
-              _photoSlot(
-                label: 'Foto prodotti',
-                bytes: _productsBytes,
-                onPick: _pickProducts,
-              ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+      body: StreamBuilder<List<FamilyMember>>(
+        stream: _familyService.streamMembers(widget.familyId),
+        builder: (context, memberSnapshot) {
+          final members = memberSnapshot.data ?? [];
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TrialQuotaBadge(
+                  used: (u) => u.scontriniUsati,
+                  max: AppUser.trialMaxScontrini,
+                  label: 'Scontrini',
+                ),
+                _modeSelector(),
+                const SizedBox(height: 16),
+                if (_needsReceipt)
+                  _photoSlot(
+                    label: 'Foto scontrino',
+                    bytes: _receiptBytes,
+                    onPick: _pickReceipt,
                   ),
-                ),
-                onPressed: _canScan && !_loading ? _scan : null,
-                child: const Text(
-                  'Scansiona',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            if (_loading) const Center(child: CircularProgressIndicator()),
-            if (_error != null)
-              Text(_error!, style: const TextStyle(color: AppColors.danger)),
-            if (_products.isNotEmpty) ...[
-              _historicalComparisonCard(),
-              const Text(
-                'Controlla e correggi prima di salvare:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: StreamBuilder<List<Envelope>>(
-                  stream: _firestoreService.streamEnvelopes(),
-                  builder: (context, envSnapshot) {
-                    final envelopes = envSnapshot.data ?? [];
-                    return ListView.builder(
-                      itemCount: _products.length,
-                      itemBuilder: (context, i) => _productCard(i, envelopes),
-                    );
-                  },
-                ),
-              ),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                if (_needsReceipt && _needsProducts)
+                  const SizedBox(height: 12),
+                if (_needsProducts)
+                  _photoSlot(
+                    label: 'Foto prodotti',
+                    bytes: _productsBytes,
+                    onPick: _pickProducts,
+                  ),
+                const SizedBox(height: 16),
+                _typeSelector(members),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onPressed: _canScan && !_loading ? _scan : null,
+                    child: const Text(
+                      'Scansiona',
+                      style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
-                  onPressed: _products.isEmpty ? null : _saveAll,
-                  child: Text(
-                    'Salva ${_products.length} spese',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
                 ),
-              ),
-            ],
-          ],
-        ),
+                const SizedBox(height: 16),
+                if (_loading) const Center(child: CircularProgressIndicator()),
+                if (_error != null)
+                  Text(
+                    _error!,
+                    style: const TextStyle(color: AppColors.danger),
+                  ),
+                if (_products.isNotEmpty) ...[
+                  const Text(
+                    'Controlla e correggi prima di salvare:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: StreamBuilder<List<Envelope>>(
+                      stream:
+                          _familyService.streamFamilyEnvelopes(widget.familyId),
+                      builder: (context, envSnapshot) {
+                        final envelopes = envSnapshot.data ?? [];
+                        return ListView.builder(
+                          itemCount: _products.length,
+                          itemBuilder: (context, i) =>
+                              _productCard(i, envelopes),
+                        );
+                      },
+                    ),
+                  ),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onPressed: _canSave() ? () => _saveAll(members) : null,
+                      child: Text(
+                        'Salva ${_products.length} spese',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -340,7 +293,6 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
         setState(() {
           _mode = selection.first;
           _products = [];
-          _historicalAverageByCategory = {};
           _error = null;
         });
       },
@@ -357,58 +309,57 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
     );
   }
 
-  /// Card "confronto con lo storico" (punto 11): mostra il totale di
-  /// questo scontrino per ogni categoria già presente nello storico spese,
-  /// affiancato alla media storica di quella categoria. Solo informativa —
-  /// non blocca né modifica in alcun modo il salvataggio.
-  Widget _historicalComparisonCard() {
-    if (_historicalAverageByCategory.isEmpty) return const SizedBox.shrink();
-
-    final scannedTotals = <String, double>{};
-    for (final p in _products) {
-      final categoria = p['categoria'] as String;
-      final prezzo = (p['prezzo'] as double?) ?? 0;
-      final quantita = (p['quantita'] as int?) ?? 1;
-      scannedTotals[categoria] =
-          (scannedTotals[categoria] ?? 0) + prezzo * quantita;
-    }
-
-    final categories = _historicalAverageByCategory.keys
-        .where((c) => (scannedTotals[c] ?? 0) > 0)
-        .toList();
-    if (categories.isEmpty) return const SizedBox.shrink();
-
+  Widget _typeSelector(List<FamilyMember> members) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Confronto con lo storico',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+            'Chi paga questa spesa?',
+            style: TextStyle(fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 6),
-          ...categories.map((category) {
-            final total = scannedTotals[category]!;
-            final average = _historicalAverageByCategory[category]!;
-            final isHigher = total > average * 1.2;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 2),
-              child: Text(
-                '$category: questo scontrino €${total.toStringAsFixed(2)} '
-                '(media storica €${average.toStringAsFixed(2)})',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: isHigher ? AppColors.warning : AppColors.neutral,
+          RadioListTile<FamilyExpenseType>(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: const Text('Condivisa (a carico di tutta la famiglia)'),
+            activeColor: AppColors.primary,
+            value: FamilyExpenseType.shared,
+            groupValue: _type,
+            onChanged: (v) => setState(() => _type = v!),
+          ),
+          RadioListTile<FamilyExpenseType>(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: const Text('Personale (a carico di un solo membro)'),
+            activeColor: AppColors.primary,
+            value: FamilyExpenseType.personal,
+            groupValue: _type,
+            onChanged: (v) => setState(() => _type = v!),
+          ),
+          if (_type == FamilyExpenseType.personal)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: DropdownButtonFormField<String>(
+                isDense: true,
+                initialValue: _selectedMemberId,
+                decoration: const InputDecoration(
+                  labelText: 'Di chi è la spesa?',
+                  isDense: true,
                 ),
+                items: members
+                    .map(
+                      (m) =>
+                          DropdownMenuItem(value: m.userId, child: Text(m.name)),
+                    )
+                    .toList(),
+                onChanged: (v) => setState(() => _selectedMemberId = v),
               ),
-            );
-          }),
+            ),
         ],
       ),
     );
@@ -463,8 +414,9 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
     );
   }
 
-  /// Crea una nuova busta al volo senza uscire dallo Scanner, riusando lo
-  /// stesso servizio del form spesa normale (`new_expense_screen.dart`).
+  /// Crea una nuova busta familiare al volo senza uscire dallo Scanner,
+  /// stesso pattern già in uso in `scan_receipt_screen.dart` per le buste
+  /// personali.
   Future<String?> _createEnvelopeInline() async {
     final nameController = TextEditingController();
     final budgetController = TextEditingController();
@@ -474,7 +426,7 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
         ),
-        title: const Text('Nuova busta'),
+        title: const Text('Nuova busta familiare'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -513,7 +465,8 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
     );
     if (created != true || nameController.text.trim().isEmpty) return null;
     final budget = double.tryParse(budgetController.text) ?? 0;
-    return _firestoreService.addEnvelope(
+    return _familyService.addFamilyEnvelope(
+      widget.familyId,
       Envelope(
         id: '',
         name: nameController.text.trim(),
@@ -638,18 +591,13 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
-              // Vedi commento analogo in new_expense_screen.dart: forza il
-              // remount del FormField quando la selezione cambia via codice
-              // (dopo "+ Nuova busta"), non solo con un tap diretto.
               key: ValueKey('${index}_${product['envelopeId']}'),
               isDense: true,
-              initialValue:
-                  product['envelopeId'] == kGeneralEnvelopeSentinel ||
-                          envelopes.any((e) => e.id == product['envelopeId'])
-                      ? product['envelopeId']
-                      : null,
+              initialValue: envelopes.any((e) => e.id == product['envelopeId'])
+                  ? product['envelopeId']
+                  : null,
               decoration: InputDecoration(
-                labelText: 'Busta',
+                labelText: 'Busta familiare',
                 isDense: true,
                 hintText: 'Seleziona busta',
                 errorText: product['envelopeId'] == null
@@ -657,15 +605,14 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
                     : null,
               ),
               items: [
-                ...envelopes.where((e) => !e.isGeneral).map(
-                      (e) => DropdownMenuItem(
-                        value: e.id,
-                        child: Text(e.name, overflow: TextOverflow.ellipsis),
-                      ),
+                ...envelopes.map(
+                  (e) => DropdownMenuItem(
+                    value: e.id,
+                    child: Text(
+                      '${e.icon} ${e.name}',
+                      overflow: TextOverflow.ellipsis,
                     ),
-                const DropdownMenuItem(
-                  value: kGeneralEnvelopeSentinel,
-                  child: Text('📦 Spese generali'),
+                  ),
                 ),
                 const DropdownMenuItem(
                   value: kNewEnvelopeSentinel,
@@ -695,31 +642,41 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
     );
   }
 
-  Future<void> _saveAll() async {
+  bool _canSave() {
+    if (_products.isEmpty) return false;
+    if (_products.any((p) => p['envelopeId'] == null)) return false;
+    if (_type == FamilyExpenseType.personal) return _selectedMemberId != null;
+    return true;
+  }
+
+  Future<void> _saveAll(List<FamilyMember> members) async {
     if (_products.any((p) => p['envelopeId'] == null)) {
       setState(() {
         _error = 'Seleziona una busta per ogni prodotto prima di salvare.';
       });
       return;
     }
-    String? generalEnvelopeId;
+    if (_type == FamilyExpenseType.personal && _selectedMemberId == null) {
+      setState(() => _error = 'Seleziona di chi è la spesa prima di salvare.');
+      return;
+    }
     for (final p in _products) {
       final quantita = (p['quantita'] as int?) ?? 1;
       final prezzo = (p['prezzo'] as double?) ?? 0;
       final nome = p['nome'] ?? '';
-      var envelopeId = p['envelopeId'] as String;
-      if (envelopeId == kGeneralEnvelopeSentinel) {
-        generalEnvelopeId ??= await _firestoreService.ensureGeneralEnvelope();
-        envelopeId = generalEnvelopeId;
-      }
-      await _firestoreService.addExpense(
-        Expense(
+      final envelopeId = p['envelopeId'] as String;
+      await _familyService.addFamilyExpense(
+        widget.familyId,
+        FamilyExpense(
           id: '',
           amount: prezzo * quantita,
-          category: p['categoria'] ?? 'Altro',
-          envelopeId: envelopeId,
           description: quantita > 1 ? '$nome (x$quantita)' : nome,
+          envelopeId: envelopeId,
           date: DateTime.now(),
+          type: _type,
+          memberId: _type == FamilyExpenseType.personal
+              ? _selectedMemberId
+              : null,
         ),
       );
     }

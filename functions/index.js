@@ -1,7 +1,9 @@
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {initializeApp} = require("firebase-admin/app");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const {getAuth} = require("firebase-admin/auth");
+const {getMessaging} = require("firebase-admin/messaging");
 const {GoogleGenerativeAI} = require("@google/generative-ai");
 const {GoogleAuth} = require("google-auth-library");
 
@@ -417,6 +419,62 @@ async function buildPersonalMonthlySummary(userId) {
   return {summary, totalEntrate, totalSpeso};
 }
 
+/**
+ * Consiglio del giorno: cache-o-genera, stessa logica già in uso dal ramo
+ * "daily_tip" di generateAiInsight — estratta qui per essere riusata anche
+ * dalla notifica push proattiva Premium (dailyScheduledChecks), che non ha
+ * un request.auth su cui appoggiarsi (gira per tutti gli utenti via Admin
+ * SDK), quindi non può chiamare la Cloud Function callable direttamente.
+ * @param {string} userId Uid dell'utente.
+ * @param {FirebaseFirestore.DocumentReference} userRef Riferimento a
+ *   users/{uid}.
+ * @param {object} userData Dati correnti del documento utente.
+ * @param {boolean} isPremium Se true, nessun limite di quota si applica.
+ * @return {Promise<{text: string, cached: boolean}>} il consiglio del
+ *   giorno.
+ */
+async function getOrGenerateDailyTip(userId, userRef, userData, isPremium) {
+  const now = new Date();
+  const todayKey = now.toISOString().slice(0, 10);
+  const cached = userData.aiDailyTip;
+  if (cached && cached.dateKey === todayKey) {
+    return {text: cached.text, cached: true};
+  }
+
+  // Solo generare da zero consuma la quota condivisa.
+  requireAnalisiQuotaAvailable(userData, isPremium);
+  const {summary} = await buildPersonalMonthlySummary(userId);
+
+  const model = genAI.getGenerativeModel({
+    model: "gemini-3.5-flash-lite",
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "object",
+        properties: {text: {type: "string"}},
+        required: ["text"],
+      },
+    },
+  });
+  const prompt = "Sei un consulente di budget personale. Basandoti " +
+    "SOLO sui dati reali forniti qui sotto (non inventare mai " +
+    "numeri), scrivi un unico consiglio pratico e specifico per " +
+    "oggi, in italiano, massimo due frasi, tono amichevole e " +
+    `concreto.\n${summary}`;
+  const result = await model.generateContent(prompt);
+  const parsed = JSON.parse(result.response.text());
+  const text = typeof parsed.text === "string" ? parsed.text : "";
+
+  await userRef.set({
+    aiDailyTip: {
+      text, dateKey: todayKey, generatedAt: now.toISOString(),
+    },
+  }, {merge: true});
+  await incrementAnalisiQuota(userRef);
+
+  return {text, cached: false};
+}
+
 exports.generateAiInsight = onCall({timeoutSeconds: 120}, async (request) => {
   try {
     if (!request.auth) {
@@ -435,44 +493,9 @@ exports.generateAiInsight = onCall({timeoutSeconds: 120}, async (request) => {
     const kind = request.data.kind;
 
     if (kind === "daily_tip") {
-      const todayKey = now.toISOString().slice(0, 10); // yyyy-MM-dd
-      const cached = userData.aiDailyTip;
-      if (cached && cached.dateKey === todayKey) {
-        return {kind, text: cached.text, cached: true};
-      }
-
-      // Solo generare da zero consuma la quota condivisa.
-      requireAnalisiQuotaAvailable(userData, isPremium);
-      const {summary} = await buildPersonalMonthlySummary(userId);
-
-      const model = genAI.getGenerativeModel({
-        model: "gemini-3.5-flash-lite",
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "object",
-            properties: {text: {type: "string"}},
-            required: ["text"],
-          },
-        },
-      });
-      const prompt = "Sei un consulente di budget personale. Basandoti " +
-        "SOLO sui dati reali forniti qui sotto (non inventare mai " +
-        "numeri), scrivi un unico consiglio pratico e specifico per " +
-        "oggi, in italiano, massimo due frasi, tono amichevole e " +
-        `concreto.\n${summary}`;
-      const result = await model.generateContent(prompt);
-      const parsed = JSON.parse(result.response.text());
-      const text = typeof parsed.text === "string" ? parsed.text : "";
-
-      await userRef.set({
-        aiDailyTip: {
-          text, dateKey: todayKey, generatedAt: now.toISOString(),
-        },
-      }, {merge: true});
-      await incrementAnalisiQuota(userRef);
-
-      return {kind, text, cached: false};
+      const {text, cached} =
+        await getOrGenerateDailyTip(userId, userRef, userData, isPremium);
+      return {kind, text, cached};
     }
 
     if (kind === "monthly_report") {
@@ -882,7 +905,8 @@ exports.inviteFamilyMember = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Devi essere autenticato.");
   }
-  const {familyId, email} = request.data;
+  const {familyId} = request.data;
+  const email = (request.data.email || "").trim().toLowerCase();
   const familyRef = db.collection("families").doc(familyId);
   const familyDoc = await familyRef.get();
 
@@ -897,8 +921,9 @@ exports.inviteFamilyMember = onCall(async (request) => {
   }
 
   // Verifica che l'email corrisponda a un utente registrato
+  let invitedUser;
   try {
-    await getAuth().getUserByEmail(email);
+    invitedUser = await getAuth().getUserByEmail(email);
   } catch (e) {
     throw new HttpsError(
         "not-found",
@@ -908,6 +933,12 @@ exports.inviteFamilyMember = onCall(async (request) => {
 
   await familyRef.collection("invites").add({
     email: email,
+    // Chiave reale di corrispondenza per la query collectionGroup del
+    // destinatario (vedi streamMyPendingInvites in family_service.dart e
+    // il match top-level {path=**}/invites in firestore.rules): l'uid
+    // resta la fonte di verità; `email` serve solo a mostrare il
+    // destinatario nella UI dell'invito.
+    invitedUid: invitedUser.uid,
     invitedBy: request.auth.uid,
     status: "pending",
     createdAt: new Date().toISOString(),
@@ -921,7 +952,7 @@ exports.acceptFamilyInvite = onCall(async (request) => {
     throw new HttpsError("unauthenticated", "Devi essere autenticato.");
   }
   const {familyId, inviteId} = request.data;
-  const userEmail = request.auth.token.email;
+  const userEmail = (request.auth.token.email || "").toLowerCase();
 
   const inviteRef = db
       .collection("families")
@@ -930,7 +961,10 @@ exports.acceptFamilyInvite = onCall(async (request) => {
       .doc(inviteId);
   const inviteDoc = await inviteRef.get();
 
-  if (!inviteDoc.exists || inviteDoc.data().email !== userEmail) {
+  // Admin SDK: bypassa le Firestore Rules, quindi qui il confronto sull'uid
+  // è solo la verifica applicativa (stessa fonte di verità della query
+  // collectionGroup del client) — nessun vincolo di "provabilità" query qui.
+  if (!inviteDoc.exists || inviteDoc.data().invitedUid !== request.auth.uid) {
     throw new HttpsError(
         "permission-denied",
         "Invito non valido per questo utente.",
@@ -1147,3 +1181,212 @@ exports.verifyPlayPurchase = onCall(async (request) => {
     throw new HttpsError("internal", error.message);
   }
 });
+
+// --- NOTIFICHE PUSH (Blocco 5 "post-beta"): avvisi Free giornalieri via
+// regole/statistiche (zero costo AI, per tutti) + consiglio del giorno
+// Premium/Trial proattivo (riusa generateAiInsight, stessa quota
+// analisiAvanzateUsate). Token FCM salvato su users/{uid}.fcmToken dal
+// client (NotificationService in lib/services/notification_service.dart,
+// richiesto dopo il wizard di configurazione, mai al primissimo avvio).
+
+/**
+ * Invia una push (se l'utente ha un token salvato) e registra sempre la
+ * notifica nello storico users/{uid}/notifications, consultabile dalla
+ * schermata "Notifiche" anche se la notifica di sistema è già sparita.
+ * @param {string} userId Uid del destinatario.
+ * @param {FirebaseFirestore.DocumentReference} userRef Riferimento a
+ *   users/{uid}.
+ * @param {{title: string, body: string, type: string}} content Contenuto.
+ * @param {string} fcmToken Token corrente dell'utente, o null/undefined se
+ *   non ha mai attivato le notifiche su questo dispositivo.
+ */
+async function sendPushAndLog(userId, userRef, content, fcmToken) {
+  await userRef.collection("notifications").add({
+    title: content.title,
+    body: content.body,
+    type: content.type,
+    read: false,
+    createdAt: new Date().toISOString(),
+  });
+
+  if (!fcmToken) return;
+  try {
+    await getMessaging().send({
+      token: fcmToken,
+      notification: {title: content.title, body: content.body},
+    });
+  } catch (error) {
+    console.error(`Push fallita per ${userId}:`, error.message);
+    // Token scaduto/disinstallato: rimosso solo se l'errore lo conferma
+    // esplicitamente, mai per un errore di rete generico.
+    if (error.code === "messaging/registration-token-not-registered") {
+      await userRef.set({fcmToken: FieldValue.delete()}, {merge: true});
+    }
+  }
+}
+
+const HIGH_USAGE_THRESHOLD = 0.85;
+// Soglia fissa di giorni senza spese registrate prima del promemoria — non
+// configurabile dall'utente per ora, coerente con la richiesta originale
+// ("da N giorni"); facile da cambiare qui se in futuro serve renderla
+// un'impostazione.
+const NO_EXPENSE_REMINDER_DAYS = 5;
+
+/**
+ * Avvisi Free (busta esaurita/quasi esaurita, promemoria "nessuna spesa da
+ * N giorni") per un singolo utente — stesse due condizioni già mostrate
+ * nella card Home (budget_insights.dart), qui reimplementate in JS perché
+ * devono girare anche per chi non apre l'app (budget_insights.dart resta
+ * l'unica fonte per la card Home, questa è un secondo calcolo indipendente
+ * con lo stesso risultato, non una duplicazione accidentale).
+ * @param {string} userId Uid dell'utente.
+ * @param {FirebaseFirestore.DocumentReference} userRef Riferimento a
+ *   users/{uid}.
+ * @param {object} userData Dati correnti del documento utente.
+ */
+async function checkUserFreeAlerts(userId, userRef, userData) {
+  const fcmToken = userData.fcmToken;
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const notifiedAlerts = userData.notifiedBudgetAlerts || {};
+  const newlyNotified = {};
+
+  const envelopesSnap = await userRef.collection("envelopes").get();
+  for (const envDoc of envelopesSnap.docs) {
+    const env = envDoc.data();
+    const budget = Number(env.budget) || 0;
+    const balance = Number(env.balance) || 0;
+    if (budget <= 0) continue;
+
+    let alertKey = null;
+    let content = null;
+    if (balance <= 0) {
+      alertKey = `${envDoc.id}_esaurita`;
+      content = {
+        title: "Busta esaurita",
+        body: `Hai esaurito la busta "${env.name}".`,
+        type: "budget_alert",
+      };
+    } else {
+      const percentUsed = (budget - balance) / budget;
+      if (percentUsed >= HIGH_USAGE_THRESHOLD) {
+        alertKey = `${envDoc.id}_soglia`;
+        content = {
+          title: "Busta quasi esaurita",
+          body: `Hai già utilizzato il ${Math.round(percentUsed * 100)}% ` +
+            `del budget "${env.name}".`,
+          type: "budget_alert",
+        };
+      }
+    }
+
+    // Al più un avviso al mese per busta+condizione, altrimenti una busta
+    // esaurita per settimane genererebbe una notifica ogni giorno.
+    if (alertKey && notifiedAlerts[alertKey] !== monthKey) {
+      await sendPushAndLog(userId, userRef, content, fcmToken);
+      newlyNotified[alertKey] = monthKey;
+    }
+  }
+
+  if (Object.keys(newlyNotified).length > 0) {
+    await userRef.set({
+      notifiedBudgetAlerts: {...notifiedAlerts, ...newlyNotified},
+    }, {merge: true});
+  }
+
+  const expensesSnap = await userRef.collection("expenses")
+      .orderBy("date", "desc").limit(1).get();
+  if (expensesSnap.empty) return;
+  const lastExpenseDate = new Date(expensesSnap.docs[0].data().date);
+  const daysSinceLastExpense = Math.floor(
+      (Date.now() - lastExpenseDate.getTime()) / 86400000,
+  );
+  // Uguaglianza esatta, non ">=": la funzione gira una volta al giorno,
+  // quindi la soglia viene attraversata una sola volta. Il controllo su
+  // notifiedNoExpenseDateKey resta comunque necessario per Cloud Scheduler
+  // (consegna "at-least-once": una ri-consegna nello stesso giorno non deve
+  // duplicare il promemoria — confermato con una ri-chiamata manuale sulla
+  // stessa condizione durante il test su emulatore, che senza questo
+  // controllo lo inviava una seconda volta).
+  const todayKey = new Date().toISOString().slice(0, 10);
+  if (daysSinceLastExpense === NO_EXPENSE_REMINDER_DAYS &&
+      userData.notifiedNoExpenseDateKey !== todayKey) {
+    await sendPushAndLog(userId, userRef, {
+      title: "Nessuna spesa registrata",
+      body: `Non registri una spesa da ${NO_EXPENSE_REMINDER_DAYS} giorni.`,
+      type: "no_expense_reminder",
+    }, fcmToken);
+    await userRef.set({notifiedNoExpenseDateKey: todayKey}, {merge: true});
+  }
+}
+
+/**
+ * Consiglio del giorno inviato come push proattiva per chi ha Premium/Trial
+ * attivo E ha un token FCM salvato (cioè ha attivato le notifiche) — stessa
+ * quota condivisa analisiAvanzateUsate delle altre funzioni AI Premium,
+ * stessa cache giornaliera di generateAiInsight (getOrGenerateDailyTip):
+ * se l'utente ha già aperto l'app oggi e il consiglio è già in cache, non
+ * viene rigenerato né consuma quota, solo inviato.
+ * @param {string} userId Uid dell'utente.
+ * @param {FirebaseFirestore.DocumentReference} userRef Riferimento a
+ *   users/{uid}.
+ * @param {object} userData Dati correnti del documento utente.
+ */
+async function sendPremiumDailyTipPush(userId, userRef, userData) {
+  if (!userData.fcmToken) return; // notifiche mai attivate su nessun device
+  const isPremium = userData.isPremium === true;
+  const trialEnd = userData.trialEnd ? new Date(userData.trialEnd) : null;
+  const isTrialActive = Boolean(trialEnd && trialEnd > new Date());
+  if (!isPremium && !isTrialActive) return; // Free: nessun contenuto AI
+
+  const todayKey = new Date().toISOString().slice(0, 10);
+  if (userData.aiDailyTip && userData.aiDailyTip.pushedDateKey === todayKey) {
+    return; // già inviata oggi (es. se la function fosse rilanciata)
+  }
+
+  try {
+    const {text} =
+      await getOrGenerateDailyTip(userId, userRef, userData, isPremium);
+    if (!text) return;
+    await sendPushAndLog(userId, userRef, {
+      title: "Il tuo consiglio di oggi",
+      body: text,
+      type: "ai_daily_tip",
+    }, userData.fcmToken);
+    await userRef.set(
+        {"aiDailyTip.pushedDateKey": todayKey}, {merge: true},
+    );
+  } catch (error) {
+    // requireAnalisiQuotaAvailable può lanciare se la quota trial è
+    // esaurita — qui non c'è un utente interattivo in attesa di un errore,
+    // si salta silenziosamente al prossimo utente.
+    console.error(
+        `Push consiglio del giorno fallita per ${userId}:`, error.message,
+    );
+  }
+}
+
+exports.dailyScheduledChecks = onSchedule(
+    {schedule: "0 9 * * *", timeZone: "Europe/Rome"},
+    async () => {
+      const usersSnap = await db.collection("users").get();
+      for (const userDoc of usersSnap.docs) {
+        const userId = userDoc.id;
+        const userRef = userDoc.ref;
+        const userData = userDoc.data();
+        try {
+          await checkUserFreeAlerts(userId, userRef, userData);
+        } catch (error) {
+          console.error(
+              `checkUserFreeAlerts fallito per ${userId}:`, error.message,
+          );
+        }
+        try {
+          await sendPremiumDailyTipPush(userId, userRef, userData);
+        } catch (error) {
+          console.error(
+              `sendPremiumDailyTipPush fallito per ${userId}:`, error.message,
+          );
+        }
+      }
+    },
+);
