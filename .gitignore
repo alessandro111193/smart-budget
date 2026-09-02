@@ -54,3 +54,6 @@ app.*.map.json
 
 # Firebase CLI local cache (hosting deploy state, non config di progetto)
 .firebase/
+
+# APK di release salvate localmente per i beta tester (binari, non nel repo)
+/releases/
