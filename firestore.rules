@@ -17,6 +17,15 @@ service cloud.firestore {
         resource.data.invitedUid == request.auth.uid;
     }
 
+    // Fase G: changelog "Novità e aggiornamenti", collection pubblica in
+    // sola lettura per qualunque utente autenticato — il contenuto viene
+    // scritto solo manualmente (Firebase Console/Admin SDK), mai dal
+    // client, così un utente non può inventarsi voci di changelog false.
+    match /changelog/{entryId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
     match /users/{userId} {
       function isSelf() {
         return request.auth != null && request.auth.uid == userId;

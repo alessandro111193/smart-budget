@@ -18,6 +18,7 @@ import '../models/recurring_expense.dart';
 import 'new_expense_screen.dart';
 import 'new_income_screen.dart';
 import 'recurring_expenses_screen.dart';
+import 'whats_new_screen.dart';
 import 'ai_chat_screen.dart';
 import 'premium_screen.dart';
 import 'buste_screen.dart';
@@ -249,6 +250,18 @@ class _HomeScreenState extends State<HomeScreen> {
                   MaterialPageRoute(
                     builder: (_) => const RecurringExpensesScreen(),
                   ),
+                );
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const AppIcon(HeroIcons.megaphone),
+              title: const Text('Novità e aggiornamenti'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const WhatsNewScreen()),
                 );
               },
             ),

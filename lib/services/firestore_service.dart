@@ -8,6 +8,7 @@ import '../models/challenge.dart';
 import '../models/envelope.dart';
 import '../models/expense.dart';
 import '../models/recurring_expense.dart';
+import '../models/changelog_entry.dart';
 import 'analytics_service.dart';
 
 class FirestoreService {
@@ -414,6 +415,21 @@ class FirestoreService {
         totalSpeso: (raw['totalSpeso'] as num?)?.toDouble() ?? 0,
       );
     });
+  }
+
+  /// Fase G: changelog "Novità e aggiornamenti", collection pubblica
+  /// top-level (non sotto users/{uid}) in sola lettura — vedi
+  /// firestore.rules. Il client non scrive mai su questa collection.
+  Stream<List<ChangelogEntry>> streamChangelog() {
+    return _db
+        .collection('changelog')
+        .orderBy('date', descending: true)
+        .snapshots()
+        .map(
+          (s) => s.docs
+              .map((d) => ChangelogEntry.fromMap(d.id, d.data()))
+              .toList(),
+        );
   }
 }
 
