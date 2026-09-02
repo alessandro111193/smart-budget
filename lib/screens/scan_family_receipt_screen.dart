@@ -11,6 +11,7 @@ import '../models/app_user.dart';
 import '../models/envelope.dart';
 import '../models/family.dart';
 import '../models/family_expense.dart';
+import '../utils/amount_input.dart';
 import '../widgets/trial_quota_badge.dart';
 
 enum _PhotoMode { receiptOnly, productsOnly, both }
@@ -437,7 +438,7 @@ class _ScanFamilyReceiptScreenState extends State<ScanFamilyReceiptScreen> {
             const SizedBox(height: 12),
             TextField(
               controller: budgetController,
-              keyboardType: TextInputType.number,
+              keyboardType: amountKeyboardType,
               decoration: const InputDecoration(
                 labelText: 'Budget mensile (€) — opzionale',
               ),
@@ -464,7 +465,7 @@ class _ScanFamilyReceiptScreenState extends State<ScanFamilyReceiptScreen> {
       ),
     );
     if (created != true || nameController.text.trim().isEmpty) return null;
-    final budget = double.tryParse(budgetController.text) ?? 0;
+    final budget = parseAmount(budgetController.text) ?? 0;
     return _familyService.addFamilyEnvelope(
       widget.familyId,
       Envelope(
@@ -561,12 +562,12 @@ class _ScanFamilyReceiptScreenState extends State<ScanFamilyReceiptScreen> {
                   flex: 2,
                   child: TextFormField(
                     initialValue: product['prezzo']?.toString() ?? '',
-                    keyboardType: TextInputType.number,
+                    keyboardType: amountKeyboardType,
                     decoration: const InputDecoration(
                       labelText: '€',
                       isDense: true,
                     ),
-                    onChanged: (v) => product['prezzo'] = double.tryParse(v),
+                    onChanged: (v) => product['prezzo'] = parseAmount(v),
                   ),
                 ),
                 const SizedBox(width: 8),

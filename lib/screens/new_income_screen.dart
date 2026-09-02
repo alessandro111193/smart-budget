@@ -8,6 +8,7 @@ import '../models/envelope.dart';
 import '../services/ai_service.dart';
 import '../services/firestore_service.dart';
 import '../services/habit_insights.dart';
+import '../utils/amount_input.dart';
 import '../widgets/app_icons.dart';
 
 class NewIncomeScreen extends StatefulWidget {
@@ -39,12 +40,12 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
 
   final Map<String, TextEditingController> _allocationControllers = {};
 
-  double get _totalIncome => double.tryParse(_totalController.text) ?? 0;
+  double get _totalIncome => parseAmount(_totalController.text) ?? 0;
 
   double _totalAssigned() {
     return _allocationControllers.values.fold(
       0,
-      (s, c) => s + (double.tryParse(c.text) ?? 0),
+      (s, c) => s + (parseAmount(c.text) ?? 0),
     );
   }
 
@@ -234,7 +235,7 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                                 final allocations = <String, double>{};
                                 _allocationControllers.forEach((id, c) {
                                   allocations[id] =
-                                      double.tryParse(c.text) ?? 0;
+                                      parseAmount(c.text) ?? 0;
                                 });
 
                                 final description = _descriptionController.text

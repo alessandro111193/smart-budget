@@ -10,6 +10,7 @@ import '../services/firestore_service.dart';
 import '../models/app_user.dart';
 import '../models/envelope.dart';
 import '../models/expense.dart';
+import '../utils/amount_input.dart';
 import '../widgets/trial_quota_badge.dart';
 
 enum _PhotoMode { receiptOnly, productsOnly, both }
@@ -485,7 +486,7 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
             const SizedBox(height: 12),
             TextField(
               controller: budgetController,
-              keyboardType: TextInputType.number,
+              keyboardType: amountKeyboardType,
               decoration: const InputDecoration(
                 labelText: 'Budget mensile (€) — opzionale',
               ),
@@ -512,7 +513,7 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
       ),
     );
     if (created != true || nameController.text.trim().isEmpty) return null;
-    final budget = double.tryParse(budgetController.text) ?? 0;
+    final budget = parseAmount(budgetController.text) ?? 0;
     return _firestoreService.addEnvelope(
       Envelope(
         id: '',
@@ -608,12 +609,12 @@ class _ScanReceiptScreenState extends State<ScanReceiptScreen> {
                   flex: 2,
                   child: TextFormField(
                     initialValue: product['prezzo']?.toString() ?? '',
-                    keyboardType: TextInputType.number,
+                    keyboardType: amountKeyboardType,
                     decoration: const InputDecoration(
                       labelText: '€',
                       isDense: true,
                     ),
-                    onChanged: (v) => product['prezzo'] = double.tryParse(v),
+                    onChanged: (v) => product['prezzo'] = parseAmount(v),
                   ),
                 ),
                 const SizedBox(width: 8),

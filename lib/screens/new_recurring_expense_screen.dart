@@ -4,6 +4,7 @@ import '../models/envelope.dart';
 import '../models/recurring_expense.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/amount_input.dart';
 
 class NewRecurringExpenseScreen extends StatefulWidget {
   /// Se valorizzata, lo schermo lavora in modalità modifica su questa
@@ -58,7 +59,7 @@ class _NewRecurringExpenseScreenState
   }
 
   Future<void> _save() async {
-    final amount = double.tryParse(_amountController.text) ?? 0;
+    final amount = parseAmount(_amountController.text) ?? 0;
     final description = _descriptionController.text.trim();
     if (amount <= 0 ||
         description.isEmpty ||
@@ -120,7 +121,7 @@ class _NewRecurringExpenseScreenState
             const SizedBox(height: 16),
             TextField(
               controller: _amountController,
-              keyboardType: TextInputType.number,
+              keyboardType: amountKeyboardType,
               decoration: _fieldDecoration(
                 labelText: 'Importo',
                 prefixText: '€ ',

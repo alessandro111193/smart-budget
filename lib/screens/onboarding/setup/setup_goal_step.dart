@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../models/challenge.dart';
 import '../../../services/firestore_service.dart';
 import '../../../theme/icon_palette.dart';
+import '../../../utils/amount_input.dart';
 
 /// Passaggio 4 del wizard reale: obiettivo di risparmio opzionale,
 /// salvato con `FirestoreService.addChallenge` (stesso servizio della
@@ -32,7 +33,7 @@ class _SetupGoalStepState extends State<SetupGoalStep> {
   }
 
   Future<void> _confirm() async {
-    final amount = double.tryParse(_amountController.text) ?? 0;
+    final amount = parseAmount(_amountController.text) ?? 0;
     final name = _nameController.text.trim();
     if (_wantsGoal == true && name.isNotEmpty && amount > 0) {
       setState(() => _saving = true);

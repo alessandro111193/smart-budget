@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/envelope.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/amount_input.dart';
 
 class NewEnvelopeScreen extends StatefulWidget {
   /// Se valorizzata, lo schermo lavora in modalità modifica su questa
@@ -49,7 +50,7 @@ class _NewEnvelopeScreenState extends State<NewEnvelopeScreen> {
             const SizedBox(height: 16),
             TextField(
               controller: _budgetController,
-              keyboardType: TextInputType.number,
+              keyboardType: amountKeyboardType,
               decoration: const InputDecoration(
                 labelText: 'Budget mensile (€) — opzionale',
               ),
@@ -74,7 +75,7 @@ class _NewEnvelopeScreenState extends State<NewEnvelopeScreen> {
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: () async {
-                final budget = double.tryParse(_budgetController.text) ?? 0;
+                final budget = parseAmount(_budgetController.text) ?? 0;
                 if (_nameController.text.isEmpty || budget < 0) return;
                 if (_isEditing) {
                   await _service.updateEnvelope(

@@ -4,6 +4,7 @@ import 'package:heroicons/heroicons.dart';
 import '../../../models/envelope.dart';
 import '../../../services/firestore_service.dart';
 import '../../../theme/icon_palette.dart';
+import '../../../utils/amount_input.dart';
 import '../../../widgets/app_icons.dart';
 import 'setup_scaffold.dart';
 
@@ -148,7 +149,7 @@ class _SetupEnvelopesStepState extends State<SetupEnvelopesStep> {
     setState(() => _saving = true);
     for (final d in _drafts) {
       final name = d.nameController.text.trim();
-      final budget = double.tryParse(d.budgetController.text) ?? 0;
+      final budget = parseAmount(d.budgetController.text) ?? 0;
       if (!d.selected || name.isEmpty || budget <= 0) continue;
       await _service.addEnvelope(
         Envelope(
@@ -250,7 +251,7 @@ class _SetupEnvelopesStepState extends State<SetupEnvelopesStep> {
               controller: d.budgetController,
               enabled: d.selected,
               textAlign: TextAlign.right,
-              keyboardType: TextInputType.number,
+              keyboardType: amountKeyboardType,
               decoration: const InputDecoration(
                 isDense: true,
                 border: InputBorder.none,

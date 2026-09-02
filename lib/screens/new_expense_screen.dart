@@ -4,6 +4,7 @@ import '../models/envelope.dart';
 import '../models/expense.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/amount_input.dart';
 
 class NewExpenseScreen extends StatefulWidget {
   const NewExpenseScreen({super.key});
@@ -60,7 +61,7 @@ class _NewExpenseScreenState extends State<NewExpenseScreen> {
             const SizedBox(height: 12),
             TextField(
               controller: budgetController,
-              keyboardType: TextInputType.number,
+              keyboardType: amountKeyboardType,
               decoration: _fieldDecoration(
                 labelText: 'Budget mensile (€) — opzionale',
               ),
@@ -87,7 +88,7 @@ class _NewExpenseScreenState extends State<NewExpenseScreen> {
       ),
     );
     if (created != true || nameController.text.trim().isEmpty) return null;
-    final budget = double.tryParse(budgetController.text) ?? 0;
+    final budget = parseAmount(budgetController.text) ?? 0;
     return _service.addEnvelope(
       Envelope(
         id: '',
@@ -101,7 +102,7 @@ class _NewExpenseScreenState extends State<NewExpenseScreen> {
   }
 
   Future<void> _save() async {
-    final amount = double.tryParse(_amountController.text) ?? 0;
+    final amount = parseAmount(_amountController.text) ?? 0;
     if (amount <= 0 || _selectedEnvelopeId == null) return;
     setState(() => _saving = true);
     var envelopeId = _selectedEnvelopeId!;
@@ -140,7 +141,7 @@ class _NewExpenseScreenState extends State<NewExpenseScreen> {
           children: [
             TextField(
               controller: _amountController,
-              keyboardType: TextInputType.number,
+              keyboardType: amountKeyboardType,
               decoration: _fieldDecoration(
                 labelText: 'Importo',
                 prefixText: '€ ',

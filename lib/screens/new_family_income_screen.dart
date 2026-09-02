@@ -9,6 +9,7 @@ import '../services/ai_service.dart';
 import '../services/family_insights.dart';
 import '../services/family_service.dart';
 import '../services/firestore_service.dart';
+import '../utils/amount_input.dart';
 import '../widgets/app_icons.dart';
 
 class NewFamilyIncomeScreen extends StatefulWidget {
@@ -32,7 +33,7 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
   IncomeDistributionSuggestion? _aiSuggestion;
   String? _aiError;
 
-  double get _totalIncome => double.tryParse(_amountController.text) ?? 0;
+  double get _totalIncome => parseAmount(_amountController.text) ?? 0;
 
   static InputDecoration _fieldDecoration({String? labelText, String? prefixText}) {
     return InputDecoration(
@@ -81,7 +82,7 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
                 builder: (context, setLocal) {
                   final assigned = _allocationControllers.values.fold<double>(
                     0,
-                    (s, c) => s + (double.tryParse(c.text) ?? 0),
+                    (s, c) => s + (parseAmount(c.text) ?? 0),
                   );
                   final remaining = _totalIncome - assigned;
 
@@ -93,7 +94,7 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
                           children: [
                             TextField(
                               controller: _amountController,
-                              keyboardType: TextInputType.number,
+                              keyboardType: amountKeyboardType,
                               decoration: _fieldDecoration(
                                 labelText: 'Importo totale (€)',
                               ),
@@ -189,7 +190,7 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
                                     child: TextField(
                                       controller:
                                           _allocationControllers[env.id],
-                                      keyboardType: TextInputType.number,
+                                      keyboardType: amountKeyboardType,
                                       textAlign: TextAlign.right,
                                       decoration: _fieldDecoration(
                                         prefixText: '€ ',
@@ -221,7 +222,7 @@ class _NewFamilyIncomeScreenState extends State<NewFamilyIncomeScreen> {
                                     final allocations = <String, double>{};
                                     _allocationControllers.forEach((id, c) {
                                       allocations[id] =
-                                          double.tryParse(c.text) ?? 0;
+                                          parseAmount(c.text) ?? 0;
                                     });
                                     await _service.addFamilyIncome(
                                       familyId: widget.familyId,

@@ -5,6 +5,7 @@ import '../theme/app_theme.dart';
 import '../models/challenge.dart';
 import '../models/envelope.dart';
 import '../services/firestore_service.dart';
+import '../utils/amount_input.dart';
 import '../widgets/app_icons.dart';
 
 class ChallengeScreen extends StatelessWidget {
@@ -291,7 +292,7 @@ class ChallengeScreen extends StatelessWidget {
         title: Text(isSaving ? 'Aggiungi al risparmio' : 'Registra spesa'),
         content: TextField(
           controller: controller,
-          keyboardType: TextInputType.number,
+          keyboardType: amountKeyboardType,
           autofocus: true,
           decoration: _fieldDecoration().copyWith(prefixText: '€ '),
         ),
@@ -303,7 +304,7 @@ class ChallengeScreen extends StatelessWidget {
           ),
           TextButton(
             onPressed: () {
-              final amount = double.tryParse(controller.text) ?? 0;
+              final amount = parseAmount(controller.text) ?? 0;
               if (amount > 0) {
                 _service.addToChallenge(c.id, amount);
               }
@@ -423,7 +424,7 @@ class ChallengeScreen extends StatelessWidget {
                       const SizedBox(height: 12),
                       TextField(
                         controller: targetController,
-                        keyboardType: TextInputType.number,
+                        keyboardType: amountKeyboardType,
                         decoration: _fieldDecoration(
                           labelText: selectedType == ChallengeType.saving
                               ? 'Obiettivo da raggiungere (€)'
@@ -486,7 +487,7 @@ class ChallengeScreen extends StatelessWidget {
                           ),
                           onPressed: () async {
                             final target =
-                                double.tryParse(targetController.text) ?? 0;
+                                parseAmount(targetController.text) ?? 0;
                             if (titleController.text.isEmpty || target <= 0) {
                               return;
                             }

@@ -5,6 +5,7 @@ import '../models/envelope.dart';
 import '../models/family.dart';
 import '../models/family_expense.dart';
 import '../services/family_service.dart';
+import '../utils/amount_input.dart';
 
 class NewFamilyExpenseScreen extends StatefulWidget {
   final String familyId;
@@ -23,7 +24,7 @@ class _NewFamilyExpenseScreenState extends State<NewFamilyExpenseScreen> {
   FamilyExpenseType _type = FamilyExpenseType.shared;
   final Map<String, TextEditingController> _splitControllers = {};
 
-  double get _amount => double.tryParse(_amountController.text) ?? 0;
+  double get _amount => parseAmount(_amountController.text) ?? 0;
 
   static InputDecoration _fieldDecoration({String? labelText, String? prefixText}) {
     return InputDecoration(
@@ -75,7 +76,7 @@ class _NewFamilyExpenseScreenState extends State<NewFamilyExpenseScreen> {
                     children: [
                       TextField(
                         controller: _amountController,
-                        keyboardType: TextInputType.number,
+                        keyboardType: amountKeyboardType,
                         decoration: _fieldDecoration(labelText: 'Importo (€)'),
                         onChanged: (_) => setLocal(() {}),
                       ),
@@ -199,7 +200,7 @@ class _NewFamilyExpenseScreenState extends State<NewFamilyExpenseScreen> {
   List<Widget> _splitFields(List<FamilyMember> members, StateSetter setLocal) {
     final assigned = _splitControllers.values.fold<double>(
       0,
-      (s, c) => s + (double.tryParse(c.text) ?? 0),
+      (s, c) => s + (parseAmount(c.text) ?? 0),
     );
     final remaining = _amount - assigned;
     return [
@@ -213,7 +214,7 @@ class _NewFamilyExpenseScreenState extends State<NewFamilyExpenseScreen> {
                 width: 120,
                 child: TextField(
                   controller: _splitControllers[m.userId],
-                  keyboardType: TextInputType.number,
+                  keyboardType: amountKeyboardType,
                   textAlign: TextAlign.right,
                   decoration: _fieldDecoration(prefixText: '€ '),
                   onChanged: (_) => setLocal(() {}),
@@ -239,7 +240,7 @@ class _NewFamilyExpenseScreenState extends State<NewFamilyExpenseScreen> {
     if (_type == FamilyExpenseType.split) {
       final assigned = _splitControllers.values.fold<double>(
         0,
-        (s, c) => s + (double.tryParse(c.text) ?? 0),
+        (s, c) => s + (parseAmount(c.text) ?? 0),
       );
       return assigned == _amount;
     }
@@ -251,7 +252,7 @@ class _NewFamilyExpenseScreenState extends State<NewFamilyExpenseScreen> {
     if (_type == FamilyExpenseType.split) {
       split = {
         for (final entry in _splitControllers.entries)
-          entry.key: double.tryParse(entry.value.text) ?? 0,
+          entry.key: parseAmount(entry.value.text) ?? 0,
       };
     }
     await _service.addFamilyExpense(

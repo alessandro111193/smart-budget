@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/envelope.dart';
 import '../services/family_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/amount_input.dart';
 
 class NewFamilyEnvelopeScreen extends StatefulWidget {
   final String familyId;
@@ -75,7 +76,7 @@ class _NewFamilyEnvelopeScreenState extends State<NewFamilyEnvelopeScreen> {
             const SizedBox(height: 16),
             TextField(
               controller: _budgetController,
-              keyboardType: TextInputType.number,
+              keyboardType: amountKeyboardType,
               decoration: _fieldDecoration(labelText: 'Budget mensile (€)'),
             ),
             const SizedBox(height: 20),
@@ -114,7 +115,7 @@ class _NewFamilyEnvelopeScreenState extends State<NewFamilyEnvelopeScreen> {
                   ),
                 ),
                 onPressed: () async {
-                  final budget = double.tryParse(_budgetController.text) ?? 0;
+                  final budget = parseAmount(_budgetController.text) ?? 0;
                   if (_nameController.text.isEmpty || budget <= 0) return;
                   if (_isEditing) {
                     await _service.updateFamilyEnvelope(
