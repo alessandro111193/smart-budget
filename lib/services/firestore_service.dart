@@ -175,8 +175,19 @@ class FirestoreService {
     );
   }
 
-  Future<void> addRecurringExpense(RecurringExpense r) {
-    return _recurringExpenses.add(r.toMap());
+  // Spese ricorrenti come funzione Premium: la creazione passa dalla
+  // Cloud Function addRecurringExpense (verifica Premium/Trial lato
+  // server, firestore.rules blocca "allow create: if false" sul client) —
+  // gestire una già esistente resta invece una scrittura diretta.
+  Future<void> addRecurringExpense(RecurringExpense r) async {
+    await FirebaseFunctions.instance
+        .httpsCallable('addRecurringExpense')
+        .call({
+          'description': r.description,
+          'amount': r.amount,
+          'envelopeId': r.envelopeId,
+          'dayOfMonth': r.dayOfMonth,
+        });
   }
 
   Future<void> updateRecurringExpense(RecurringExpense r) {

@@ -1134,6 +1134,67 @@ exports.createFamily = onCall(async (request) => {
   }
 });
 
+// --- SPESE RICORRENTI COME FUNZIONE PREMIUM ---
+//
+// Trovato nell'audit del 2026-09-03: erano liberamente creabili da
+// qualunque utente Free, sia lato client sia lato Firestore Rules —
+// contraddice il requisito esplicito dell'utente ("le spese ricorrenti
+// sono una funzionalità Premium"). Solo la CREAZIONE passa da qui: gestire
+// (modificare/eliminare/confermare) una spesa ricorrente già esistente
+// resta una scrittura diretta client (stesso pattern di
+// buste/spese/entrate/challenge) — non è "usare" la funzionalità Premium,
+// è amministrare un dato che l'utente ha già.
+exports.addRecurringExpense = onCall(async (request) => {
+  try {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Devi essere autenticato.");
+    }
+    const userId = request.auth.uid;
+    const userRef = db.collection("users").doc(userId);
+    const userDoc = await userRef.get();
+    requireActiveAccess(userDoc.data() || {});
+
+    const {description, amount, envelopeId, dayOfMonth} = request.data || {};
+    if (typeof description !== "string" || !description.trim()) {
+      throw new HttpsError(
+          "invalid-argument", "La descrizione è obbligatoria.",
+      );
+    }
+    const amountNum = Number(amount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      throw new HttpsError(
+          "invalid-argument", "amount deve essere un numero positivo.",
+      );
+    }
+    if (typeof envelopeId !== "string" || !envelopeId) {
+      throw new HttpsError("invalid-argument", "envelopeId è obbligatorio.");
+    }
+    const dayNum = Number(dayOfMonth);
+    if (!Number.isInteger(dayNum) || dayNum < 1 || dayNum > 28) {
+      throw new HttpsError(
+          "invalid-argument", "dayOfMonth deve essere tra 1 e 28.",
+      );
+    }
+
+    const docRef = await userRef.collection("recurringExpenses").add({
+      description: description.trim(),
+      amount: amountNum,
+      envelopeId,
+      dayOfMonth: dayNum,
+      active: true,
+      lastGeneratedMonthKey: null,
+    });
+
+    return {id: docRef.id};
+  } catch (error) {
+    console.error("ERRORE ADD RECURRING EXPENSE:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", error.message);
+  }
+});
+
 // Membri totali per famiglia, owner incluso (X del piano concordato con
 // l'utente: 3 totali = owner + 2 membri Free). Un solo posto Premium
 // (l'owner) basta a sbloccare l'accesso per tutta la famiglia, quindi il

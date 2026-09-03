@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:heroicons/heroicons.dart';
 
+import '../models/app_user.dart';
 import '../models/envelope.dart';
 import '../models/recurring_expense.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_icons.dart';
 import 'new_recurring_expense_screen.dart';
+import 'premium_screen.dart';
 
 class RecurringExpensesScreen extends StatelessWidget {
   const RecurringExpensesScreen({super.key});
@@ -142,13 +144,27 @@ class RecurringExpensesScreen extends StatelessWidget {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: AppColors.primary,
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const NewRecurringExpenseScreen()),
-        ),
-        child: const AppIcon(HeroIcons.plus, color: Colors.white),
+      // Creare una nuova spesa ricorrente è Premium (trovato nell'audit
+      // del 2026-09-03: prima era liberamente disponibile a chiunque,
+      // contraddicendo il requisito esplicito) — gestire quelle già
+      // esistenti (elenco sopra, modifica/elimina) resta libero.
+      floatingActionButton: StreamBuilder<AppUser>(
+        stream: service.streamUser(),
+        builder: (context, userSnapshot) {
+          final hasAi = userSnapshot.data?.hasAiAccess ?? false;
+          return FloatingActionButton(
+            backgroundColor: AppColors.primary,
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => hasAi
+                    ? const NewRecurringExpenseScreen()
+                    : PremiumScreen(),
+              ),
+            ),
+            child: const AppIcon(HeroIcons.plus, color: Colors.white),
+          );
+        },
       ),
     );
   }

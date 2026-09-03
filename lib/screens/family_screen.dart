@@ -73,14 +73,18 @@ class FamilyScreen extends StatelessWidget {
   }
 
   Widget _noFamilyView(BuildContext context) {
-    // Blocco C: creare una famiglia è ora una funzione Premium (Trial
-    // conta come attivo), ma unirsi con un invito resta possibile per
-    // chiunque con piano Free — quindi gli inviti pendenti restano sempre
-    // visibili, solo il modulo di creazione è condizionato.
+    // Modello a due abbonamenti (2026-09-03): creare una famiglia richiede
+    // il tier "famiglia" (Trial conta come anteprima completa) — un
+    // Premium base senza questo tier non basta più, coerente con
+    // requireFamilyTierAccess lato server (prima si controllava solo
+    // hasAiAccess, che un Premium senza tier avrebbe superato lato client
+    // per poi fallire solo al salvataggio). Unirsi con un invito resta
+    // possibile per chiunque con piano Free — quindi gli inviti pendenti
+    // restano sempre visibili, solo il modulo di creazione è condizionato.
     return StreamBuilder<AppUser>(
       stream: _userService.streamUser(),
       builder: (context, snapshot) {
-        final hasAi = snapshot.data?.hasAiAccess ?? false;
+        final hasFamilyTier = snapshot.data?.hasFamilyTierAccess ?? false;
         return Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -91,7 +95,7 @@ class FamilyScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
-              if (hasAi)
+              if (hasFamilyTier)
                 _createFamilyForm(context)
               else
                 _createFamilyPremiumNotice(context),
@@ -154,15 +158,19 @@ class FamilyScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Creare una famiglia è una funzione Premium',
+            'Creare una famiglia richiede il piano Premium Famiglia',
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
           ),
           const SizedBox(height: 6),
           // "2" = MAX_FAMILY_MEMBERS (functions/index.js) - 1 (l'owner):
           // testo puramente informativo, va aggiornato a mano insieme alla
-          // costante server se il limite cambia in futuro.
+          // costante server se il limite cambia in futuro. Il Premium Famiglia
+          // non è ancora un prodotto reale acquistabile (Fase 6a, in attesa
+          // di Google Play Billing) — per ora si attiva solo manualmente;
+          // il Trial resta l'unico modo self-service di provarlo.
           const Text(
-            'Passa a Premium (o attiva un Trial) per creare una famiglia e '
+            'Attiva un Trial gratuito per provarla — il piano Premium '
+            'Famiglia (in arrivo) permetterà di creare una famiglia e '
             'invitare fino a 2 membri con piano Free.',
             style: TextStyle(fontSize: 13, color: AppColors.neutral),
           ),
