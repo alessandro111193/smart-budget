@@ -6,6 +6,7 @@ import '../models/challenge.dart';
 import '../models/envelope.dart';
 import '../services/firestore_service.dart';
 import '../utils/amount_input.dart';
+import '../utils/date_format_it.dart';
 import '../widgets/app_icons.dart';
 
 class ChallengeScreen extends StatelessWidget {
@@ -218,6 +219,12 @@ class ChallengeScreen extends StatelessWidget {
             if (isSaving && effective.monthlyQuota != null)
               Text(
                 'Quota mensile consigliata: €${effective.monthlyQuota!.toStringAsFixed(2)}',
+                style: const TextStyle(color: AppColors.neutral, fontSize: 12),
+              ),
+            if (isSaving && effective.projectedCompletionDate != null)
+              Text(
+                'Al ritmo attuale, raggiungerai l\'obiettivo intorno al '
+                '${formatDateIt(effective.projectedCompletionDate!)}',
                 style: const TextStyle(color: AppColors.neutral, fontSize: 12),
               ),
             if (isSaving && effective.isOnTrack != null) ...[

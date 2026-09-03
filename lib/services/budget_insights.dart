@@ -65,9 +65,18 @@ class BudgetInsights {
           final dailyRate = spentThisMonth / daysElapsed;
           final projectedFurtherSpend = dailyRate * daysRemaining;
           if (projectedFurtherSpend > env.balance) {
+            // Giorno stimato di esaurimento, solo se cade entro questo
+            // mese — oltre non è un dato utile da mostrare con precisione
+            // (l'andamento di oggi potrebbe non valere per settimane).
+            final daysUntilEmpty = (env.balance / dailyRate).ceil();
+            final exhaustionDay = daysElapsed + daysUntilEmpty;
+            final dateText = exhaustionDay <= daysInMonth
+                ? 'intorno al $exhaustionDay del mese'
+                : 'prima della fine del mese';
             alerts.add(BudgetAlert(
-              'Con il ritmo di spesa attuale rischi di esaurire la busta '
-              '"${env.name}" prima della fine del mese.',
+              'La busta "${env.name}" viene utilizzata a un ritmo di circa '
+              '€${dailyRate.toStringAsFixed(0)} al giorno: con questo '
+              'andamento potrebbe esaurirsi $dateText.',
               BudgetAlertSeverity.warning,
             ));
           }

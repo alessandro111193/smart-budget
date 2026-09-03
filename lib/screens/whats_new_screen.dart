@@ -4,19 +4,8 @@ import 'package:heroicons/heroicons.dart';
 import '../models/changelog_entry.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/date_format_it.dart';
 import '../widgets/app_icons.dart';
-
-const _mesiIt = [
-  'gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
-  'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre',
-];
-
-/// Data in italiano senza dipendere dai dati di localizzazione di `intl`
-/// (mai inizializzati in questo progetto, es. `initializeDateFormatting`) —
-/// solo una tabella statica dei mesi, coerente con `flutter_localizations`
-/// già configurato in main.dart per i widget Material (date/time picker).
-String _formatDateIt(DateTime date) =>
-    '${date.day} ${_mesiIt[date.month - 1]} ${date.year}';
 
 /// Fase G del piano post-beta: changelog "Novità e aggiornamenti" letto
 /// dalla collection Firestore top-level `changelog` (sola lettura per il
@@ -105,7 +94,7 @@ class WhatsNewScreen extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(left: 36),
             child: Text(
-              'v${entry.version} · ${_formatDateIt(entry.date)}',
+              'v${entry.version} · ${formatDateIt(entry.date)}',
               style: const TextStyle(fontSize: 12, color: AppColors.neutral),
             ),
           ),

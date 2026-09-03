@@ -94,6 +94,33 @@ class Challenge {
     return actualProgress >= expectedProgress - 0.05;
   }
 
+  /// Sotto questa soglia di giorni trascorsi dalla creazione non proiettiamo
+  /// il ritmo di risparmio: con pochi giorni di dati la proiezione sarebbe
+  /// troppo rumorosa (es. un primo versamento grande subito dopo la
+  /// creazione farebbe sembrare l'obiettivo quasi raggiunto).
+  static const int _minDaysForProjection = 3;
+
+  /// Data stimata di raggiungimento dell'obiettivo al ritmo di risparmio
+  /// attuale (diverso da [monthlyQuota], che dice quanto servirebbe
+  /// mettere da parte per rispettare la scadenza — questo dice invece
+  /// "continuando così, ce la farai il [data]", prima o dopo la scadenza
+  /// che sia). Solo calcolo Dart, zero costo. Null se: non è un obiettivo
+  /// di risparmio, manca [createdAt], sono passati troppo pochi giorni per
+  /// una stima affidabile, o non è stato ancora risparmiato nulla (nessun
+  /// ritmo da proiettare — mai una data inventata).
+  DateTime? get projectedCompletionDate {
+    if (type != ChallengeType.saving || createdAt == null) return null;
+    final elapsedDays = DateTime.now().difference(createdAt!).inDays;
+    if (elapsedDays < _minDaysForProjection) return null;
+    final remainingAmount = targetAmount - savedAmount;
+    if (remainingAmount <= 0) return DateTime.now();
+    if (savedAmount <= 0) return null;
+    final dailyRate = savedAmount / elapsedDays;
+    if (dailyRate <= 0) return null;
+    final daysNeeded = (remainingAmount / dailyRate).ceil();
+    return DateTime.now().add(Duration(days: daysNeeded));
+  }
+
   /// Conversione da DocumentSnapshot di Firestore a oggetto Challenge
   factory Challenge.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>? ?? {};
