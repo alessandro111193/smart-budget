@@ -3,6 +3,25 @@
 ## Cos'è
 App Flutter + Firebase di gestione budget familiare basata su "cash stuffing digitale": ogni entrata viene distribuita tra buste prima di essere spesa. Modello Free (analisi via regole, no AI) / Premium (AI generativa, scanner scontrino, previsioni).
 
+## ⚠️ Checklist pre-lancio — attivare prima di pubblicare l'app
+
+Elenco unico, tenuto aggiornato, di tutto ciò che è stato **volutamente rimandato** (per costo reale, per una decisione dell'utente, o per un setup esterno non ancora fatto) — da rivedere punto per punto prima del lancio pubblico. Ogni voce rimanda alla sezione con i dettagli completi più sotto in questo file.
+
+**A. Comporta vere chiamate Gemini in produzione — in attesa di conferma esplicita dell'utente prima di implementare** (vedi "Stima costo AI per utente Premium"):
+- "Posso permettermelo?" (FASE 3) — funzione completamente nuova, mai iniziata.
+- AI: classifica esplicita "categorie che incidono di più", insight dedicato ai suggerimenti per obiettivi, individuazione sprechi come categoria a sé (estensioni di `generateAiInsight`).
+
+**B. Pronto, in pausa volontaria, zero costo finché non attivato:**
+- `dailyScheduledChecks` (notifiche push giornaliere: avvisi budget Free + consiglio del giorno Premium) — codice completo e testato, mai deployato in produzione (vedi Block 5).
+
+**C. Bloccato su setup esterno — richiede azioni dell'utente su Google Play/AdMob/altro, non implementabile da qui:**
+- Google Play Billing reale (Fase 6a): `applicationId` definitivo, prodotto abbonamento su Play Console, service account per `verifyPlayPurchase`.
+- Modello a due abbonamenti (Premium base vs Premium Famiglia) — oggi solo schema dati (`subscriptionTier`, attivabile solo a mano via `adminSetPremiumStatus`): la logica di prezzo reale e l'upgrade "paga solo la differenza" dipendono dal punto sopra.
+- AdMob reale (Fase 6b): oggi solo ID di test.
+- Pubblicazione (Fase L): firma release reale dell'APK, icona app definitiva, `applicationId` definitivo, privacy policy, test chiuso Play Console (12 tester per 14 giorni), naming/branding/logo (esplicitamente rimandati a una fase successiva su richiesta dell'utente).
+
+**D. Dati di test da ripulire in produzione quando comodo** (nessun dato finanziario reale, vedi Block 2): account `budget.test.owner@example.com`/`budget.test.membro@example.com` e famiglia "Famiglia Test E2E"; canale Hosting di anteprima `preview-pwa` (scade comunque da solo).
+
 ## Regole obbligatorie — NON derogabili
 - Prima di modificare codice, analizza il repository esistente. Non riscrivere da zero.
 - Non eliminare funzionalità esistenti senza spiegare perché.
