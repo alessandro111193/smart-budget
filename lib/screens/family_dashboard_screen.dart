@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:heroicons/heroicons.dart';
 
@@ -12,6 +13,7 @@ import '../services/family_insights.dart';
 import '../services/family_service.dart';
 import '../services/firestore_service.dart';
 import '../widgets/app_icons.dart';
+import '../widgets/family_premium_blocked_card.dart';
 import 'new_family_envelope_screen.dart';
 import 'new_family_income_screen.dart';
 
@@ -39,7 +41,29 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
         elevation: 0,
         iconTheme: const IconThemeData(color: AppColors.ink),
       ),
-      body: StreamBuilder<List<FamilyMember>>(
+      // Blocco D: senza questo controllo, un Premium/Trial scaduto
+      // farebbe fallire per permessi le 4 stream sotto (envelopes/
+      // expenses/incomes bloccate dalle Firestore Rules) — con
+      // `.data ?? []` l'errore sarebbe passato inosservato, mostrando una
+      // dashboard vuota invece di spiegare perché.
+      body: StreamBuilder<Family?>(
+        stream: _service.streamFamily(widget.familyId),
+        builder: (context, familySnapshot) {
+          final family = familySnapshot.data;
+          if (family == null) return const SizedBox.shrink();
+          return FamilyAccessGate(
+            family: family,
+            myUid: FirebaseAuth.instance.currentUser?.uid,
+            title: 'Dashboard Famiglia',
+            child: _dashboardBody(),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _dashboardBody() {
+    return StreamBuilder<List<FamilyMember>>(
         stream: _service.streamMembers(widget.familyId),
         builder: (context, memberSnapshot) {
           final members = memberSnapshot.data ?? [];
@@ -149,8 +173,7 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
             },
           );
         },
-      ),
-    );
+      );
   }
 
   Widget _scopeSelector(List<FamilyMember> members) {

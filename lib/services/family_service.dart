@@ -22,24 +22,17 @@ class FamilyService {
         .map((doc) => doc.exists ? (doc.data()?['familyId'] as String?) : null);
   }
 
+  // Blocco C (Famiglia come funzione Premium): non più una scrittura
+  // diretta su Firestore (firestore.rules blocca "allow create: if false"
+  // sui client) — passa dalla Cloud Function createFamily, che verifica
+  // Premium/Trial attivo lato server prima di creare qualunque documento.
   Future<String> createFamily(String name) async {
-    final familyRef = _db.collection('families').doc();
-    await familyRef.set({
-      'name': name,
-      'ownerId': userId,
-      'createdAt': DateTime.now().toIso8601String(),
-    });
-    await familyRef.collection('members').doc(userId).set({
-      'name': FirebaseAuth.instance.currentUser?.displayName ?? 'Io',
-      'role': 'owner',
-      'colorTag': '#16B98C',
-      'joinedAt': DateTime.now().toIso8601String(),
-    });
-    await _db.collection('users').doc(userId).set({
-      'familyId': familyRef.id,
-    }, SetOptions(merge: true));
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('createFamily')
+        .call({'name': name});
+    final familyId = result.data['familyId'] as String;
     AnalyticsService.logFamilyCreated();
-    return familyRef.id;
+    return familyId;
   }
 
   Stream<Family?> streamFamily(String familyId) {

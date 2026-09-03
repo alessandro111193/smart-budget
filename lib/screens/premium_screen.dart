@@ -1,3 +1,4 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:heroicons/heroicons.dart';
@@ -241,7 +242,7 @@ class _PremiumScreenState extends State<PremiumScreen> {
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: () => _service.startTrial(),
+            onPressed: () => _startTrial(),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white,
               foregroundColor: AppColors.accent,
@@ -304,6 +305,28 @@ class _PremiumScreenState extends State<PremiumScreen> {
         ],
       ],
     );
+  }
+
+  /// Durante la beta il trial self-service può essere disattivato lato
+  /// server (Blocco B, `functions/index.js` → `isSelfServiceTrialEnabled`):
+  /// senza questo try/catch il bottone sembrerebbe non fare nulla, dato che
+  /// `FirestoreService.startTrial()` non veniva mai osservato prima d'ora.
+  Future<void> _startTrial() async {
+    try {
+      await _service.startTrial();
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message ?? 'Impossibile attivare il trial.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Impossibile attivare il trial. Riprova più tardi.'),
+        ),
+      );
+    }
   }
 
   Future<void> _restorePurchases() async {

@@ -102,8 +102,23 @@ class _NewExpenseScreenState extends State<NewExpenseScreen> {
   }
 
   Future<void> _save() async {
-    final amount = parseAmount(_amountController.text) ?? 0;
-    if (amount <= 0 || _selectedEnvelopeId == null) return;
+    final amount = parseAmount(_amountController.text);
+    if (amount == null || amount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Inserisci un importo valido (es. 12,50 o 12.50).',
+          ),
+        ),
+      );
+      return;
+    }
+    if (_selectedEnvelopeId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Seleziona una busta.')),
+      );
+      return;
+    }
     setState(() => _saving = true);
     var envelopeId = _selectedEnvelopeId!;
     if (envelopeId == kGeneralEnvelopeSentinel) {

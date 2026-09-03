@@ -102,21 +102,72 @@ class SetupEnvelopesStep extends StatefulWidget {
   State<SetupEnvelopesStep> createState() => _SetupEnvelopesStepState();
 }
 
+/// Calcola i budget suggeriti per ogni categoria di [_suggested],
+/// applicando prima i fattori di scala per persona (Fase E) e poi
+/// riproporzionando tutti gli importi in modo che la loro somma torni
+/// SEMPRE esattamente all'entrata inserita, indipendentemente da quante
+/// persone sono in famiglia — un bug reale trovato con numeri concreti
+/// (famiglia di 4, entrata €1.500): senza questa riproporzione i fattori
+/// di scala gonfiavano il totale a €2.194, il 46% in più dell'entrata
+/// reale. Le persone in più devono cambiare COME si distribuisce la
+/// stessa cifra tra le categorie, mai QUANTO totale viene distribuito.
+/// Top-level (non un metodo privato della State) e `@visibleForTesting`
+/// così un test può verificare direttamente il calcolo senza montare il
+/// widget (che richiederebbe Firebase inizializzato).
+@visibleForTesting
+List<double> suggestedEnvelopeBudgets(double monthlyIncome, int householdSize) {
+  final target = (monthlyIncome > 0 ? monthlyIncome : 2400).round();
+  final extraPeople = (householdSize - 1).clamp(0, 7);
+
+  final raw = _suggested.map((s) {
+    final householdFactor = 1 + s.householdFactorPerExtraPerson * extraPeople;
+    return target * s.incomeShare * householdFactor;
+  }).toList();
+  final rawSum = raw.fold<double>(0, (a, b) => a + b);
+  if (rawSum <= 0) return List.filled(_suggested.length, 0);
+
+  // Riscala proporzionalmente così la somma grezza (gonfiata dai fattori
+  // di scala per le famiglie numerose) torna a coincidere con l'entrata
+  // reale, mantenendo però intatto il rapporto relativo tra categorie che
+  // i fattori di scala avevano introdotto.
+  final scaled = raw.map((r) => r * target / rawSum).toList();
+
+  // Arrotonda all'euro mantenendo la somma ESATTA (metodo dei resti più
+  // grandi): arrotondare ogni importo per conto proprio (es.
+  // roundToDouble singolarmente) può far scostare la somma finale di
+  // qualche euro dal target, cosa non accettabile qui — l'utente si
+  // aspetta una corrispondenza esatta, non "circa".
+  final floors = scaled.map((v) => v.floorToDouble()).toList();
+  final floorSum = floors.fold<double>(0, (a, b) => a + b).round();
+  var remainder = target - floorSum;
+  final order = List.generate(scaled.length, (i) => i)
+    ..sort((a, b) => (scaled[b] - floors[b]).compareTo(scaled[a] - floors[a]));
+  final result = List<double>.from(floors);
+  for (var i = 0; i < order.length && remainder > 0; i++) {
+    result[order[i]] += 1;
+    remainder--;
+  }
+  return result;
+}
+
 class _SetupEnvelopesStepState extends State<SetupEnvelopesStep> {
   final _service = FirestoreService();
-  late final List<_EnvelopeDraft> _drafts = _suggested.map((s) {
-    final base = widget.monthlyIncome > 0 ? widget.monthlyIncome : 2400;
-    final extraPeople = (widget.householdSize - 1).clamp(0, 7);
-    final householdFactor =
-        1 + s.householdFactorPerExtraPerson * extraPeople;
-    return _EnvelopeDraft(
-      selected: true,
-      name: s.name,
-      budget: (base * s.incomeShare * householdFactor).roundToDouble(),
-      emoji: s.emoji,
-      category: s.category,
+  late final List<_EnvelopeDraft> _drafts = () {
+    final budgets = suggestedEnvelopeBudgets(
+      widget.monthlyIncome,
+      widget.householdSize,
     );
-  }).toList();
+    return List.generate(_suggested.length, (i) {
+      final s = _suggested[i];
+      return _EnvelopeDraft(
+        selected: true,
+        name: s.name,
+        budget: budgets[i],
+        emoji: s.emoji,
+        category: s.category,
+      );
+    });
+  }();
 
   bool _saving = false;
 

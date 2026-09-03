@@ -1,3 +1,4 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:heroicons/heroicons.dart';
@@ -8,6 +9,7 @@ import '../services/firestore_service.dart';
 import '../models/app_user.dart';
 import '../models/family.dart';
 import '../widgets/app_icons.dart';
+import '../widgets/family_premium_blocked_card.dart';
 import 'family_dashboard_screen.dart';
 import 'new_family_expense_screen.dart';
 import 'premium_screen.dart';
@@ -71,40 +73,111 @@ class FamilyScreen extends StatelessWidget {
   }
 
   Widget _noFamilyView(BuildContext context) {
+    // Blocco C: creare una famiglia è ora una funzione Premium (Trial
+    // conta come attivo), ma unirsi con un invito resta possibile per
+    // chiunque con piano Free — quindi gli inviti pendenti restano sempre
+    // visibili, solo il modulo di creazione è condizionato.
+    return StreamBuilder<AppUser>(
+      stream: _userService.streamUser(),
+      builder: (context, snapshot) {
+        final hasAi = snapshot.data?.hasAiAccess ?? false;
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Non fai ancora parte di una famiglia',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              if (hasAi)
+                _createFamilyForm(context)
+              else
+                _createFamilyPremiumNotice(context),
+              const SizedBox(height: 24),
+              const Text(
+                'Oppure, se qualcuno ti ha invitato:',
+                style: TextStyle(color: AppColors.neutral, fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+              _pendingInvites(context),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _createFamilyForm(BuildContext context) {
     final nameController = TextEditingController();
-    return Padding(
-      padding: const EdgeInsets.all(20),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: nameController,
+          decoration: _fieldDecoration(labelText: 'Nome della famiglia'),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            style: _primaryButtonStyle(AppColors.primary),
+            onPressed: () async {
+              if (nameController.text.isEmpty) return;
+              try {
+                await _service.createFamily(nameController.text);
+              } on FirebaseFunctionsException catch (e) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(e.message ?? 'Impossibile creare la famiglia.'),
+                  ),
+                );
+              }
+            },
+            child: const Text('Crea famiglia'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _createFamilyPremiumNotice(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Non fai ancora parte di una famiglia',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            'Creare una famiglia è una funzione Premium',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
           ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: nameController,
-            decoration: _fieldDecoration(labelText: 'Nome della famiglia'),
+          const SizedBox(height: 6),
+          // "2" = MAX_FAMILY_MEMBERS (functions/index.js) - 1 (l'owner):
+          // testo puramente informativo, va aggiornato a mano insieme alla
+          // costante server se il limite cambia in futuro.
+          const Text(
+            'Passa a Premium (o attiva un Trial) per creare una famiglia e '
+            'invitare fino a 2 membri con piano Free.',
+            style: TextStyle(fontSize: 13, color: AppColors.neutral),
           ),
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
               style: _primaryButtonStyle(AppColors.primary),
-              onPressed: () async {
-                if (nameController.text.isEmpty) return;
-                await _service.createFamily(nameController.text);
-              },
-              child: const Text('Crea famiglia'),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => PremiumScreen()),
+              ),
+              child: const Text('Vai a Premium'),
             ),
           ),
-          const SizedBox(height: 24),
-          const Text(
-            'Oppure, se qualcuno ti ha invitato:',
-            style: TextStyle(color: AppColors.neutral, fontSize: 13),
-          ),
-          const SizedBox(height: 8),
-          _pendingInvites(context),
         ],
       ),
     );
@@ -145,8 +218,25 @@ class FamilyScreen extends StatelessWidget {
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     ),
                   ),
-                  onPressed: () =>
-                      _service.acceptInvite(inv['familyId'], inv['inviteId']),
+                  onPressed: () async {
+                    // Blocco C: può fallire con "resource-exhausted" se la
+                    // famiglia ha già raggiunto il numero massimo di membri
+                    // — prima d'ora questa chiamata non poteva mai fallire
+                    // per un motivo visibile all'utente, quindi non aveva
+                    // alcuna gestione d'errore.
+                    try {
+                      await _service.acceptInvite(
+                        inv['familyId'],
+                        inv['inviteId'],
+                      );
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Errore: ${e.toString()}')),
+                        );
+                      }
+                    }
+                  },
                   child: const Text('Accetta'),
                 ),
               ),
@@ -162,11 +252,21 @@ class FamilyScreen extends StatelessWidget {
       stream: _service.streamFamily(familyId),
       builder: (context, familySnapshot) {
         final family = familySnapshot.data;
-        return ListView(
+        if (family == null) return const SizedBox.shrink();
+        // Blocco D: se il Premium/Trial dell'owner è scaduto, buste/spese/
+        // entrate familiari restano intatte su Firestore (le Rules le
+        // bloccano in lettura/scrittura) — FamilyAccessGate mostra subito
+        // il motivo invece di un errore di permessi generico o una
+        // schermata vuota se si provasse comunque a caricarle sotto.
+        return FamilyAccessGate(
+          family: family,
+          myUid: FirebaseAuth.instance.currentUser?.uid,
+          title: family.name,
+          child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
             Text(
-              family?.name ?? '',
+              family.name,
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
@@ -180,10 +280,10 @@ class FamilyScreen extends StatelessWidget {
               builder: (context, snapshot) {
                 final members = snapshot.data ?? [];
                 final myUid = FirebaseAuth.instance.currentUser?.uid;
-                final isOwner = family?.ownerId == myUid;
+                final isOwner = family.ownerId == myUid;
                 return Column(
                   children: members.map((m) {
-                    final canRemove = isOwner && m.userId != family?.ownerId;
+                    final canRemove = isOwner && m.userId != family.ownerId;
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       elevation: 0,
@@ -301,6 +401,7 @@ class FamilyScreen extends StatelessWidget {
               },
             ),
           ],
+          ),
         );
       },
     );

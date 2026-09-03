@@ -77,6 +77,61 @@ async function incrementAnalisiQuota(userRef) {
   );
 }
 
+// --- BLOCCO D (cambio modello di business Famiglia): BLOCCO NON
+// DISTRUTTIVO SU PREMIUM SCADUTO ---
+//
+// Un membro non-owner non può leggere users/{uid} dell'owner (le
+// Firestore Rules lo permettono solo a se stessi), quindi né la UI né le
+// Rules delle sottocollection famiglia (envelopes/expenses/incomes)
+// possono verificare direttamente lo stato Premium dell'owner. Soluzione:
+// denormalizzare ownerIsPremium/ownerTrialEnd su families/{familyId}
+// stesso, riletti da qui ogni volta che lo stato Premium/Trial di un
+// owner cambia. A differenza di users/{uid}.trialEnd (stringa ISO8601,
+// per compatibilità con codice esistente), qui ownerTrialEnd è un vero
+// Firestore Timestamp fin dall'inizio — permette un confronto diretto con
+// request.time nelle Rules, cosa che una stringa non avrebbe permesso.
+
+/**
+ * Aggiorna ownerIsPremium/ownerTrialEnd su tutte le famiglie di cui uid è
+ * owner, rileggendo lo stato fresco da users/{uid} (mai i valori passati
+ * dal chiamante) per non rischiare disallineamenti se in futuro un'altra
+ * funzione scrivesse solo isPremium o solo trialEnd senza l'altro.
+ * @param {string} uid Uid dell'utente il cui stato Premium/Trial è appena
+ *   cambiato.
+ */
+async function syncFamilyAccessForOwner(uid) {
+  const userDoc = await db.collection("users").doc(uid).get();
+  const userData = userDoc.data() || {};
+  const ownerIsPremium = userData.isPremium === true;
+  const ownerTrialEnd = userData.trialEnd ? new Date(userData.trialEnd) : null;
+
+  const familiesSnap = await db.collection("families")
+      .where("ownerId", "==", uid).get();
+  if (familiesSnap.empty) return;
+
+  const batch = db.batch();
+  familiesSnap.forEach((doc) => {
+    batch.update(doc.ref, {ownerIsPremium, ownerTrialEnd});
+  });
+  await batch.commit();
+}
+
+/**
+ * Stessa logica di requireActiveAccess, ma sui campi denormalizzati di un
+ * documento families/{familyId} invece che su users/{uid} — usata dove
+ * serve verificare l'accesso dell'owner senza poter leggere il suo
+ * documento utente privato (es. inviteFamilyMember, chiamata da chiunque
+ * sia già owner ma che qui verifica lo stato salvato, non il proprio).
+ * @param {object} familyData Dati del documento families/{familyId}.
+ * @return {boolean} true se l'owner ha Premium o Trial attivo.
+ */
+function isFamilyAccessActive(familyData) {
+  const ownerIsPremium = familyData.ownerIsPremium === true;
+  const trialEnd = familyData.ownerTrialEnd ?
+    familyData.ownerTrialEnd.toDate() : null;
+  return ownerIsPremium || Boolean(trialEnd && trialEnd > new Date());
+}
+
 // --- RATE LIMITING: contatore a finestra fissa su Firestore ---
 //
 // Indipendente dai contatori Premium/Trial sopra (che limitano il consumo
@@ -988,6 +1043,71 @@ exports.suggestShoppingList = onCall(
     },
 );
 
+// --- BLOCCO C (cambio modello di business Famiglia): FAMIGLIA COME
+// FUNZIONE PREMIUM ---
+//
+// Prima era una scrittura diretta dal client (family_service.dart), senza
+// alcun controllo Premium né lato client né nelle Firestore Rules. Ora
+// passa da questa Cloud Function, l'unico modo per creare una famiglia
+// (firestore.rules blocca "allow create: if false" sul client). Trial
+// conta come accesso valido, stessa equivalenza di requireActiveAccess
+// già usata ovunque nel resto dell'app (confermato con l'utente).
+exports.createFamily = onCall(async (request) => {
+  try {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Devi essere autenticato.");
+    }
+    const userId = request.auth.uid;
+    const userRef = db.collection("users").doc(userId);
+    const userDoc = await userRef.get();
+    const userData = userDoc.data() || {};
+    requireActiveAccess(userData);
+
+    const name = String(request.data.name || "").trim();
+    if (!name) {
+      throw new HttpsError(
+          "invalid-argument",
+          "Il nome della famiglia è obbligatorio.",
+      );
+    }
+
+    const userRecord = await getAuth().getUser(userId);
+    const familyRef = db.collection("families").doc();
+    await familyRef.set({
+      name,
+      ownerId: userId,
+      createdAt: new Date().toISOString(),
+      // Blocco D: denormalizzati subito alla creazione dallo stesso
+      // userData già letto sopra per requireActiveAccess, invece di una
+      // chiamata separata a syncFamilyAccessForOwner.
+      ownerIsPremium: userData.isPremium === true,
+      ownerTrialEnd: userData.trialEnd ? new Date(userData.trialEnd) : null,
+    });
+    await familyRef.collection("members").doc(userId).set({
+      name: userRecord.displayName || "Io",
+      role: "owner",
+      colorTag: "#16B98C",
+      joinedAt: new Date().toISOString(),
+    });
+    await userRef.set({familyId: familyRef.id}, {merge: true});
+
+    return {familyId: familyRef.id};
+  } catch (error) {
+    console.error("ERRORE CREATE FAMILY:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", error.message);
+  }
+});
+
+// Membri totali per famiglia, owner incluso (X del piano concordato con
+// l'utente: 3 totali = owner + 2 membri Free). Un solo posto Premium
+// (l'owner) basta a sbloccare l'accesso per tutta la famiglia, quindi il
+// limite serve a impedire che troppe persone si "agganciano" gratis a un
+// unico abbonamento.
+const MAX_FAMILY_MEMBERS = 3;
+
 // --- FASE 4: FUNZIONI PER GESTIONE INVITI FAMIGLIA ---
 
 exports.inviteFamilyMember = onCall(async (request) => {
@@ -1006,6 +1126,30 @@ exports.inviteFamilyMember = onCall(async (request) => {
     throw new HttpsError(
         "permission-denied",
         "Solo il proprietario può invitare.",
+    );
+  }
+
+  // Blocco D: non ha senso far entrare nuovi membri in una famiglia il cui
+  // accesso è bloccato — gli inviti già pendenti restano comunque
+  // accettabili (acceptFamilyInvite non ha questo controllo), solo la
+  // creazione di NUOVI inviti è bloccata.
+  if (!isFamilyAccessActive(familyDoc.data())) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Il Premium del proprietario è scaduto: riattivalo per invitare " +
+        "nuovi membri.",
+    );
+  }
+
+  // Controllo rapido lato invito (non l'unica difesa: il conteggio reale
+  // e definitivo è nella transazione di acceptFamilyInvite più sotto, che
+  // copre anche il caso di più inviti pendenti accettati in parallelo).
+  const membersSnap = await familyRef.collection("members").get();
+  if (membersSnap.size >= MAX_FAMILY_MEMBERS) {
+    throw new HttpsError(
+        "resource-exhausted",
+        `La famiglia ha già raggiunto il numero massimo di ` +
+        `${MAX_FAMILY_MEMBERS} membri.`,
     );
   }
 
@@ -1043,43 +1187,50 @@ exports.acceptFamilyInvite = onCall(async (request) => {
   const {familyId, inviteId} = request.data;
   const userEmail = (request.auth.token.email || "").toLowerCase();
 
-  const inviteRef = db
-      .collection("families")
-      .doc(familyId)
-      .collection("invites")
-      .doc(inviteId);
-  const inviteDoc = await inviteRef.get();
-
-  // Admin SDK: bypassa le Firestore Rules, quindi qui il confronto sull'uid
-  // è solo la verifica applicativa (stessa fonte di verità della query
-  // collectionGroup del client) — nessun vincolo di "provabilità" query qui.
-  if (!inviteDoc.exists || inviteDoc.data().invitedUid !== request.auth.uid) {
-    throw new HttpsError(
-        "permission-denied",
-        "Invito non valido per questo utente.",
-    );
-  }
+  const familyRef = db.collection("families").doc(familyId);
+  const inviteRef = familyRef.collection("invites").doc(inviteId);
+  const memberRef = familyRef.collection("members").doc(request.auth.uid);
+  const userRef = db.collection("users").doc(request.auth.uid);
 
   const userRecord = await getAuth().getUser(request.auth.uid);
 
-  await db
-      .collection("families")
-      .doc(familyId)
-      .collection("members")
-      .doc(request.auth.uid)
-      .set({
-        name: userRecord.displayName || userEmail,
-        role: "member",
-        colorTag: "#2563EB",
-        joinedAt: new Date().toISOString(),
-      });
+  // Transazione: sia la verifica dell'invito sia il conteggio membri
+  // (Blocco C, limite MAX_FAMILY_MEMBERS) devono restare atomici insieme
+  // alla scrittura del nuovo membro, altrimenti due inviti accettati nello
+  // stesso istante potrebbero superare entrambi il limite prima che il
+  // conteggio si aggiorni.
+  await db.runTransaction(async (tx) => {
+    const inviteDoc = await tx.get(inviteRef);
+    // Admin SDK: bypassa le Firestore Rules, quindi qui il confronto
+    // sull'uid è solo la verifica applicativa (stessa fonte di verità
+    // della query collectionGroup del client) — nessun vincolo di
+    // "provabilità" query qui.
+    if (!inviteDoc.exists ||
+        inviteDoc.data().invitedUid !== request.auth.uid) {
+      throw new HttpsError(
+          "permission-denied",
+          "Invito non valido per questo utente.",
+      );
+    }
 
-  await db.collection("users").doc(request.auth.uid).set(
-      {familyId: familyId},
-      {merge: true},
-  );
+    const membersSnap = await tx.get(familyRef.collection("members"));
+    if (membersSnap.size >= MAX_FAMILY_MEMBERS) {
+      throw new HttpsError(
+          "resource-exhausted",
+          `La famiglia ha già raggiunto il numero massimo di ` +
+          `${MAX_FAMILY_MEMBERS} membri.`,
+      );
+    }
 
-  await inviteRef.update({status: "accepted"});
+    tx.set(memberRef, {
+      name: userRecord.displayName || userEmail,
+      role: "member",
+      colorTag: "#2563EB",
+      joinedAt: new Date().toISOString(),
+    });
+    tx.set(userRef, {familyId: familyId}, {merge: true});
+    tx.update(inviteRef, {status: "accepted"});
+  });
 
   return {message: "Ti sei unito alla famiglia."};
 });
@@ -1144,10 +1295,40 @@ exports.removeFamilyMember = onCall(async (request) => {
 // i contatori d'uso modificando solo il client: il trial va quindi attivato
 // da qui, stesso comportamento di prima (15 giorni, contatori azzerati).
 
+// --- BLOCCO B (revisione controllo accessi Premium durante la beta):
+// FLAG PER DISATTIVARE IL TRIAL SELF-SERVICE ---
+//
+// Durante la beta il trial si attiva SOLO manualmente (Blocco A,
+// adminSetPremiumStatus): letto da un unico documento di configurazione
+// invece che tramite un nuovo deploy, così si riattiva in futuro (quando
+// il trial self-service tornerà pubblico) modificando solo un documento
+// Firestore, senza toccare il codice. Nessuna Firestore Rule necessaria:
+// letto solo dall'Admin SDK, mai dal client. Fail-closed di proposito: se
+// il documento non esiste ancora (come subito dopo questo deploy) il
+// trial risulta disattivato di default, non il contrario.
+/**
+ * Legge il flag di configurazione che abilita/disabilita l'attivazione
+ * self-service del trial (startTrial). Fail-closed: se il documento di
+ * configurazione non esiste ancora, il trial risulta disattivato.
+ * @return {Promise<boolean>} true solo se il flag è esplicitamente true.
+ */
+async function isSelfServiceTrialEnabled() {
+  const doc = await db.collection("config").doc("beta").get();
+  return doc.exists && doc.data().selfServiceTrialEnabled === true;
+}
+
 exports.startTrial = onCall(async (request) => {
   try {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Devi essere autenticato.");
+    }
+    if (!(await isSelfServiceTrialEnabled())) {
+      throw new HttpsError(
+          "failed-precondition",
+          "L'attivazione del trial gratuito è temporaneamente disattivata " +
+          "durante la beta. Contatta l'amministratore per attivare il tuo " +
+          "accesso Premium.",
+      );
     }
     await enforceStartTrialRateLimit(
         request.auth.uid,
@@ -1164,9 +1345,90 @@ exports.startTrial = onCall(async (request) => {
         },
         {merge: true},
     );
+    // Blocco D: se questo utente è owner di una famiglia, il nuovo trial
+    // deve riflettersi subito sull'accesso familiare denormalizzato.
+    await syncFamilyAccessForOwner(request.auth.uid);
     return {trialEnd: trialEnd.toISOString()};
   } catch (error) {
     console.error("ERRORE START TRIAL:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", error.message);
+  }
+});
+
+// --- BLOCCO A (revisione controllo accessi Premium durante la beta):
+// ATTIVAZIONE MANUALE PREMIUM/TRIAL ---
+//
+// Sostituisce qualunque futuro meccanismo di auto-assegnazione: durante la
+// beta, Premium/Trial si attivano SOLO chiamando questa funzione, e SOLO
+// dall'account amministratore elencato qui sotto. Nessuna UI in-app la
+// espone (nessuno schermo "riservato" esiste ancora, vedi Fase H nel
+// piano) — va chiamata direttamente (Firebase Console → Functions → test,
+// oppure un token ID reale + una richiesta HTTPS diretta), documentato in
+// CLAUDE.md.
+const ADMIN_EMAILS = ["alessandrocozzolino1193@gmail.com"];
+
+exports.adminSetPremiumStatus = onCall(async (request) => {
+  try {
+    if (!request.auth || !ADMIN_EMAILS.includes(request.auth.token.email)) {
+      throw new HttpsError(
+          "permission-denied",
+          "Funzione riservata all'amministratore.",
+      );
+    }
+
+    const {targetUid, targetEmail, isPremium, trialDays} = request.data || {};
+    let uid = targetUid;
+    if (!uid) {
+      if (!targetEmail) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Specifica targetUid o targetEmail.",
+        );
+      }
+      let user;
+      try {
+        user = await getAuth().getUserByEmail(
+            String(targetEmail).trim().toLowerCase(),
+        );
+      } catch (e) {
+        throw new HttpsError(
+            "not-found",
+            "Nessun utente registrato con questa email.",
+        );
+      }
+      uid = user.uid;
+    }
+
+    const update = {};
+    if (typeof isPremium === "boolean") {
+      update.isPremium = isPremium;
+    }
+    if (typeof trialDays === "number" && trialDays > 0) {
+      update.trialEnd = new Date(
+          Date.now() + trialDays * 24 * 60 * 60 * 1000,
+      ).toISOString();
+    } else if (trialDays === 0) {
+      // Revoca esplicita del trial (utile per testare il blocco accessi
+      // del Blocco D senza aspettare una scadenza naturale).
+      update.trialEnd = null;
+    }
+    if (Object.keys(update).length === 0) {
+      throw new HttpsError(
+          "invalid-argument",
+          "Specifica isPremium e/o trialDays.",
+      );
+    }
+
+    await db.collection("users").doc(uid).set(update, {merge: true});
+    // Blocco D: se uid è owner di una famiglia, sblocca/blocca subito
+    // l'accesso familiare denormalizzato, senza aspettare un altro trigger.
+    await syncFamilyAccessForOwner(uid);
+    return {uid, ...update};
+  } catch (error) {
+    console.error("ERRORE ADMIN SET PREMIUM STATUS:", error);
     if (error instanceof HttpsError) {
       throw error;
     }
@@ -1264,6 +1526,10 @@ exports.verifyPlayPurchase = onCall(async (request) => {
         },
         {merge: true},
     );
+    // Blocco D: un abbonamento reale attivato/scaduto deve riflettersi
+    // subito sull'accesso familiare denormalizzato, se questo utente è
+    // owner di una famiglia.
+    await syncFamilyAccessForOwner(request.auth.uid);
 
     return {isPremium: isActive, expiryTime};
   } catch (error) {

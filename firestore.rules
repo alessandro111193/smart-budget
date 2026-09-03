@@ -86,9 +86,31 @@ service cloud.firestore {
         return request.auth != null &&
           get(/databases/$(database)/documents/families/$(familyId)).data.ownerId == request.auth.uid;
       }
+      // Blocco D: a differenza di trialEnd su users/{uid} (stringa
+      // ISO8601), ownerTrialEnd qui è un vero Timestamp fin dall'inizio
+      // (scritto solo da Cloud Function via Admin SDK) — permette un
+      // confronto diretto con request.time. .get(..., default) protegge
+      // dal caso in cui i campi non esistano ancora su un documento.
+      function familyAccessActive() {
+        let f = get(/databases/$(database)/documents/families/$(familyId)).data;
+        return f.get('ownerIsPremium', false) == true ||
+          (f.get('ownerTrialEnd', null) != null &&
+            f.get('ownerTrialEnd', null) > request.time);
+      }
 
+      // La lettura del documento famiglia stesso resta permessa a
+      // qualunque membro indipendentemente dall'accesso Premium
+      // dell'owner: è l'unico modo per la UI di leggere
+      // ownerIsPremium/ownerTrialEnd e mostrare la schermata di blocco
+      // invece di un errore generico o uno schermo vuoto.
       allow read: if isMember();
-      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+      // Blocco C (Famiglia come funzione Premium): la creazione richiede
+      // che l'owner abbia Premium/Trial attivo, un controllo temporale che
+      // qui non è affidabile (trialEnd è salvato come stringa ISO8601, non
+      // come Timestamp — un confronto con request.time non sarebbe
+      // corretto). Passa quindi solo dalla Cloud Function createFamily
+      // (Admin SDK, bypassa questa regola), mai da una scrittura diretta.
+      allow create: if false;
       allow update, delete: if isOwner();
 
       match /members/{memberId} {
@@ -121,14 +143,18 @@ service cloud.firestore {
         allow delete: if isOwner();
       }
 
+      // Blocco D: buste/spese/entrate familiari restano intatte su
+      // Firestore quando il Premium dell'owner scade — solo inaccessibili
+      // dall'app finché non torna attivo. Nessun dato cancellato, solo
+      // "isMember()" non basta più da solo.
       match /envelopes/{envelopeId} {
-        allow read, write: if isMember();
+        allow read, write: if isMember() && familyAccessActive();
       }
       match /expenses/{expenseId} {
-        allow read, write: if isMember();
+        allow read, write: if isMember() && familyAccessActive();
       }
       match /incomes/{incomeId} {
-        allow read, write: if isMember();
+        allow read, write: if isMember() && familyAccessActive();
       }
     }
   }

@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class FamilyMember {
   final String userId;
   final String name;
@@ -42,13 +44,36 @@ class Family {
   final String name;
   final String ownerId;
 
-  Family({required this.id, required this.name, required this.ownerId});
+  /// Blocco D: stato Premium/Trial dell'owner denormalizzato qui, perché
+  /// un membro non-owner non può leggere users/{uid} dell'owner (le
+  /// Firestore Rules lo permettono solo a se stessi). Aggiornati dalle
+  /// Cloud Function che toccano lo stato Premium dell'owner
+  /// (createFamily, adminSetPremiumStatus, startTrial, verifyPlayPurchase).
+  final bool ownerIsPremium;
+  final DateTime? ownerTrialEnd;
+
+  Family({
+    required this.id,
+    required this.name,
+    required this.ownerId,
+    this.ownerIsPremium = false,
+    this.ownerTrialEnd,
+  });
 
   factory Family.fromMap(String id, Map<String, dynamic> data) {
+    final trialEndRaw = data['ownerTrialEnd'];
     return Family(
       id: id,
       name: data['name'] ?? '',
       ownerId: data['ownerId'] ?? '',
+      ownerIsPremium: data['ownerIsPremium'] == true,
+      ownerTrialEnd: trialEndRaw is Timestamp ? trialEndRaw.toDate() : null,
     );
   }
+
+  /// true se l'owner ha Premium o Trial attivo — stessa equivalenza di
+  /// AppUser.hasAiAccess, qui applicata all'accesso familiare invece che
+  /// a quello personale.
+  bool get accessActive =>
+      ownerIsPremium || (ownerTrialEnd != null && ownerTrialEnd!.isAfter(DateTime.now()));
 }

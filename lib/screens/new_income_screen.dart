@@ -230,40 +230,52 @@ class _NewIncomeScreenState extends State<NewIncomeScreen> {
                             borderRadius: BorderRadius.circular(14),
                           ),
                         ),
-                        onPressed: _totalIncome > 0
-                            ? () async {
-                                final allocations = <String, double>{};
-                                _allocationControllers.forEach((id, c) {
-                                  allocations[id] =
-                                      parseAmount(c.text) ?? 0;
-                                });
+                        onPressed: () async {
+                          // Bottone sempre tappabile: prima era disabilitato
+                          // silenziosamente con _totalIncome <= 0, che al
+                          // tocco non dava alcun feedback — mai un bottone
+                          // che "non fa niente" senza spiegare perché.
+                          if (_totalIncome <= 0) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Inserisci un importo totale valido '
+                                  '(es. 1500,00 o 1500.00).',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                          final allocations = <String, double>{};
+                          _allocationControllers.forEach((id, c) {
+                            allocations[id] = parseAmount(c.text) ?? 0;
+                          });
 
-                                final description = _descriptionController.text
-                                    .trim();
-                                final finalDesc = description.isEmpty
-                                    ? _selectedCategory
-                                    : description;
+                          final description = _descriptionController.text
+                              .trim();
+                          final finalDesc = description.isEmpty
+                              ? _selectedCategory
+                              : description;
 
-                                // Chiamata al servizio con la categoria inclusa
-                                await _service.addIncome(
-                                  description: finalDesc,
-                                  amount: _totalIncome,
-                                  category: _selectedCategory,
-                                  allocations: allocations,
-                                );
+                          // Chiamata al servizio con la categoria inclusa
+                          await _service.addIncome(
+                            description: finalDesc,
+                            amount: _totalIncome,
+                            category: _selectedCategory,
+                            allocations: allocations,
+                          );
 
-                                if (context.mounted) {
-                                  Navigator.pop(context);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Entrata registrata e distribuita!',
-                                      ),
-                                    ),
-                                  );
-                                }
-                              }
-                            : null,
+                          if (context.mounted) {
+                            Navigator.pop(context);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Entrata registrata e distribuita!',
+                                ),
+                              ),
+                            );
+                          }
+                        },
                         child: const Text(
                           'Registra e distribuisci entrata',
                           style: TextStyle(fontWeight: FontWeight.bold),
