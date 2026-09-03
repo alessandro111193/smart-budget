@@ -1462,7 +1462,7 @@ exports.startTrial = onCall(async (request) => {
 // piano) — va chiamata direttamente (Firebase Console → Functions → test,
 // oppure un token ID reale + una richiesta HTTPS diretta), documentato in
 // CLAUDE.md.
-const ADMIN_EMAILS = ["alessandrocozzolino1193@gmail.com"];
+const ADMIN_EMAILS = ["alessandrocoo@hotmail.it"];
 
 // Utility temporanea one-shot: verifica se in produzione esistono famiglie
 // create PRIMA del Blocco C/D (quindi senza ownerIsPremium/ownerTrialEnd),
