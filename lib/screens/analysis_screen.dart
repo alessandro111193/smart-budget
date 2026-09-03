@@ -4,6 +4,7 @@ import 'package:heroicons/heroicons.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/app_icons.dart';
+import '../widgets/monthly_trend_chart.dart';
 import '../services/firestore_service.dart';
 import '../services/ai_service.dart';
 import '../services/habit_insights.dart';
@@ -394,7 +395,7 @@ class AnalysisScreen extends StatelessWidget {
                     const SizedBox(height: 12),
                     SizedBox(
                       height: 140,
-                      child: _MonthlyTrendChart(data: monthlyTrend),
+                      child: MonthlyTrendChart(data: monthlyTrend),
                     ),
                     const SizedBox(height: 20),
                   ],
@@ -690,87 +691,3 @@ class _HabitAnalysisCardState extends State<_HabitAnalysisCard> {
   }
 }
 
-/// Grafico a barre dell'andamento delle spese negli ultimi 6 mesi (incluso
-/// quello corrente). Un'unica serie (spesa totale mensile): un solo colore,
-/// nessuna legenda necessaria, valore esatto al tocco su ciascuna barra.
-class _MonthlyTrendChart extends StatelessWidget {
-  const _MonthlyTrendChart({required this.data});
-
-  final List<({String label, double total})> data;
-
-  @override
-  Widget build(BuildContext context) {
-    final maxValue = data.fold<double>(0, (m, d) => d.total > m ? d.total : m);
-    final maxY = maxValue == 0 ? 1.0 : maxValue * 1.25;
-
-    return BarChart(
-      BarChartData(
-        maxY: maxY,
-        alignment: BarChartAlignment.spaceAround,
-        gridData: const FlGridData(show: false),
-        borderData: FlBorderData(show: false),
-        barTouchData: BarTouchData(
-          touchTooltipData: BarTouchTooltipData(
-            getTooltipItem: (group, groupIndex, rod, rodIndex) {
-              return BarTooltipItem(
-                '€${rod.toY.toStringAsFixed(2)}',
-                const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 11,
-                ),
-              );
-            },
-          ),
-        ),
-        titlesData: FlTitlesData(
-          leftTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          rightTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          topTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 20,
-              getTitlesWidget: (value, meta) {
-                final i = value.toInt();
-                if (i < 0 || i >= data.length) return const SizedBox.shrink();
-                return Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    data[i].label,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.neutral,
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-        barGroups: List.generate(data.length, (i) {
-          final d = data[i];
-          return BarChartGroupData(
-            x: i,
-            barRods: [
-              BarChartRodData(
-                toY: d.total,
-                color: AppColors.primary,
-                width: 22,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(4),
-                ),
-              ),
-            ],
-          );
-        }),
-      ),
-    );
-  }
-}

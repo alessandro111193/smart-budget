@@ -14,6 +14,7 @@ import '../services/family_service.dart';
 import '../services/firestore_service.dart';
 import '../widgets/app_icons.dart';
 import '../widgets/family_premium_blocked_card.dart';
+import '../widgets/monthly_trend_chart.dart';
 import 'new_family_envelope_screen.dart';
 import 'new_family_income_screen.dart';
 
@@ -92,7 +93,11 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
                           const SizedBox(height: 12),
                           _incomesCard(incomes),
                           const SizedBox(height: 12),
+                          _savingsCard(expenses, incomes, members),
+                          const SizedBox(height: 12),
                           _categoryBreakdown(expenses, envelopes, members),
+                          const SizedBox(height: 12),
+                          _trendChart(expenses, members),
                           const SizedBox(height: 12),
                           _FamilyAnalysisCard(
                             expenses: expenses,
@@ -287,6 +292,101 @@ class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
               color: AppColors.primary,
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Risparmio (entrate − spese) nello scope selezionato — trovato mancante
+  /// nell'audit funzionale del 2026-09-03 rispetto alla richiesta esplicita
+  /// dell'utente, aggiunto qui con lo stesso stile delle altre card.
+  Widget _savingsCard(
+    List<FamilyExpense> expenses,
+    List<FamilyIncome> incomes,
+    List<FamilyMember> members,
+  ) {
+    final isFamily = _selectedScope == 'Famiglia';
+    final totalExpenses = isFamily
+        ? _service.familyTotalExpenses(expenses)
+        : _service.memberExpenseTotal(expenses, _selectedScope, members.length);
+    final totalIncomes = isFamily
+        ? _service.familyTotalIncomes(incomes)
+        : _service.memberIncomeTotal(incomes, _selectedScope);
+    final savings = totalIncomes - totalExpenses;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            isFamily ? 'Risparmio famiglia' : 'Il tuo risparmio (quota)',
+            style: const TextStyle(
+              color: AppColors.neutral,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          Text(
+            '€${savings.toStringAsFixed(2)}',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              color: savings >= 0 ? AppColors.primary : AppColors.danger,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Andamento delle spese negli ultimi 6 mesi nello scope selezionato —
+  /// stesso `MonthlyTrendChart` già usato per la versione personale
+  /// (`analysis_screen.dart`), trovato mancante lato famiglia nell'audit
+  /// (prima c'era solo il confronto mese corrente vs precedente).
+  Widget _trendChart(List<FamilyExpense> expenses, List<FamilyMember> members) {
+    final now = DateTime.now();
+    final isFamily = _selectedScope == 'Famiglia';
+    const monthLabels = [
+      'Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu',
+      'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic',
+    ];
+    final trend = <({String label, double total})>[];
+    for (int i = 5; i >= 0; i--) {
+      final monthDate = DateTime(now.year, now.month - i, 1);
+      final nextMonthDate = DateTime(now.year, now.month - i + 1, 1);
+      final monthExpenses = expenses
+          .where(
+            (e) =>
+                !e.date.isBefore(monthDate) && e.date.isBefore(nextMonthDate),
+          )
+          .toList();
+      final total = isFamily
+          ? _service.familyTotalExpenses(monthExpenses)
+          : _service.memberExpenseTotal(
+              monthExpenses, _selectedScope, members.length,
+            );
+      trend.add((label: monthLabels[monthDate.month - 1], total: total));
+    }
+    if (!trend.any((t) => t.total > 0)) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Andamento spese ultimi 6 mesi',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(height: 140, child: MonthlyTrendChart(data: trend)),
         ],
       ),
     );
