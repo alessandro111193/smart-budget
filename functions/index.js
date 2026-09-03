@@ -40,6 +40,39 @@ function requireActiveAccess(userData) {
   return {isPremium, isTrialActive};
 }
 
+// --- MODELLO A DUE ABBONAMENTI (Premium base vs Premium Famiglia) ---
+//
+// Deciso con l'utente: la Famiglia non è più inclusa in qualunque Premium
+// (come nel Blocco C originale) — diventa un abbonamento separato, più
+// caro, che include tutto il Premium base più la possibilità di creare una
+// famiglia con membri Free agganciati. Solo lo SCHEMA è pronto ora
+// (campo `subscriptionTier` su users/{uid}, gestibile solo dalla function
+// amministrativa): nessun prodotto Play Billing reale esiste ancora
+// (bloccato sugli stessi prerequisiti di Fase 6a), quindi nessun vero
+// pagamento è coinvolto in questo cambiamento. Il Trial continua a dare
+// accesso di anteprima completo, Famiglia inclusa, senza bisogno del tier.
+
+/**
+ * Verifica che l'utente possa creare/mantenere una famiglia: Trial attivo
+ * (anteprima completa), oppure Premium con subscriptionTier == "famiglia".
+ * Un Premium senza questo tier viene respinto anche se ha accesso valido
+ * alle altre funzioni Premium (AI, scanner, ecc.).
+ * @param {object} userData Dati del documento users/{uid}.
+ * @return {{isPremium: boolean, isTrialActive: boolean}} stato accesso.
+ */
+function requireFamilyTierAccess(userData) {
+  const {isPremium, isTrialActive} = requireActiveAccess(userData);
+  const hasFamilyTier = isPremium && userData.subscriptionTier === "famiglia";
+  if (!hasFamilyTier && !isTrialActive) {
+    throw new HttpsError(
+        "permission-denied",
+        "La Famiglia richiede il piano Premium Famiglia (non incluso nel " +
+        "Premium base) oppure un Trial attivo.",
+    );
+  }
+  return {isPremium, isTrialActive};
+}
+
 // Stesso limite di AppUser.trialMaxAnalisi in lib/models/app_user.dart:
 // va tenuto allineato manualmente, come già per gli altri due contatori.
 const TRIAL_MAX_ANALISI_AVANZATE = 10;
@@ -1061,7 +1094,7 @@ exports.createFamily = onCall(async (request) => {
     const userRef = db.collection("users").doc(userId);
     const userDoc = await userRef.get();
     const userData = userDoc.data() || {};
-    requireActiveAccess(userData);
+    requireFamilyTierAccess(userData);
 
     const name = String(request.data.name || "").trim();
     if (!name) {
@@ -1370,6 +1403,42 @@ exports.startTrial = onCall(async (request) => {
 // CLAUDE.md.
 const ADMIN_EMAILS = ["alessandrocozzolino1193@gmail.com"];
 
+// Utility temporanea one-shot: verifica se in produzione esistono famiglie
+// create PRIMA del Blocco C/D (quindi senza ownerIsPremium/ownerTrialEnd),
+// che risulterebbero bloccate per errore dalle nuove Firestore Rules
+// (fail-closed su campi mancanti) senza che l'owner abbia mai perso
+// davvero l'accesso. Backfilla con lo stato reale attuale dell'owner
+// (riusa syncFamilyAccessForOwner, la stessa funzione già in produzione) —
+// non distruttivo, non inventa nulla: se l'owner non ha oggi Premium/Trial
+// attivo la famiglia risulterà bloccata anche dopo, correttamente. Da
+// rimuovere dopo l'uso, non è pensata per restare permanente.
+exports.adminBackfillFamilyAccess = onCall(async (request) => {
+  if (!request.auth || !ADMIN_EMAILS.includes(request.auth.token.email)) {
+    throw new HttpsError(
+        "permission-denied",
+        "Funzione riservata all'amministratore.",
+    );
+  }
+  const familiesSnap = await db.collection("families").get();
+  const report = [];
+  for (const doc of familiesSnap.docs) {
+    const data = doc.data();
+    const hadFields = Object.prototype.hasOwnProperty.call(
+        data, "ownerIsPremium",
+    );
+    report.push({
+      id: doc.id,
+      name: data.name,
+      ownerId: data.ownerId,
+      hadFieldsBefore: hadFields,
+    });
+    if (!hadFields) {
+      await syncFamilyAccessForOwner(data.ownerId);
+    }
+  }
+  return {totalFamilies: familiesSnap.size, report};
+});
+
 exports.adminSetPremiumStatus = onCall(async (request) => {
   try {
     if (!request.auth || !ADMIN_EMAILS.includes(request.auth.token.email)) {
@@ -1379,7 +1448,8 @@ exports.adminSetPremiumStatus = onCall(async (request) => {
       );
     }
 
-    const {targetUid, targetEmail, isPremium, trialDays} = request.data || {};
+    const {targetUid, targetEmail, isPremium, trialDays, tier} =
+      request.data || {};
     let uid = targetUid;
     if (!uid) {
       if (!targetEmail) {
@@ -1415,10 +1485,16 @@ exports.adminSetPremiumStatus = onCall(async (request) => {
       // del Blocco D senza aspettare una scadenza naturale).
       update.trialEnd = null;
     }
+    if (tier === "famiglia" || tier === "premium") {
+      update.subscriptionTier = tier;
+    } else if (tier === null) {
+      // Rimuove esplicitamente il tier Famiglia (torna al Premium base).
+      update.subscriptionTier = FieldValue.delete();
+    }
     if (Object.keys(update).length === 0) {
       throw new HttpsError(
           "invalid-argument",
-          "Specifica isPremium e/o trialDays.",
+          "Specifica isPremium, trialDays e/o tier.",
       );
     }
 
@@ -1429,6 +1505,94 @@ exports.adminSetPremiumStatus = onCall(async (request) => {
     return {uid, ...update};
   } catch (error) {
     console.error("ERRORE ADMIN SET PREMIUM STATUS:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", error.message);
+  }
+});
+
+// --- ELIMINAZIONE COMPLETA ACCOUNT (amministrativa) ---
+//
+// Dato uid o email: cancella il documento users/{uid} con TUTTE le sue
+// sottocollezioni (envelopes/expenses/incomes/challenges/
+// recurringExpenses/notifications, via recursiveDelete) e l'account
+// Firebase Auth corrispondente. Caso limite deciso esplicitamente con
+// l'utente: se è owner di una famiglia con altri membri, l'INTERA
+// famiglia viene eliminata (buste/spese/entrate/membri/inviti condivisi
+// inclusi) insieme a lui — scelta distruttiva ma esplicita, non un
+// trasferimento di proprietà implicito né un blocco silenzioso. Se invece
+// è solo membro (non owner) di una famiglia altrui, viene rimosso solo il
+// suo documento membro, la famiglia resta intatta per gli altri.
+exports.deleteUserCompletely = onCall(async (request) => {
+  try {
+    if (!request.auth || !ADMIN_EMAILS.includes(request.auth.token.email)) {
+      throw new HttpsError(
+          "permission-denied",
+          "Funzione riservata all'amministratore.",
+      );
+    }
+
+    const {targetUid, targetEmail} = request.data || {};
+    let uid = targetUid;
+    if (!uid) {
+      if (!targetEmail) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Specifica targetUid o targetEmail.",
+        );
+      }
+      let user;
+      try {
+        user = await getAuth().getUserByEmail(
+            String(targetEmail).trim().toLowerCase(),
+        );
+      } catch (e) {
+        throw new HttpsError(
+            "not-found",
+            "Nessun utente registrato con questa email.",
+        );
+      }
+      uid = user.uid;
+    }
+
+    const userRef = db.collection("users").doc(uid);
+    const userDoc = await userRef.get();
+    const userData = userDoc.data() || {};
+
+    // Famiglie di cui è owner: eliminate per intero (decisione esplicita).
+    const ownedFamiliesSnap = await db.collection("families")
+        .where("ownerId", "==", uid).get();
+    for (const familyDoc of ownedFamiliesSnap.docs) {
+      await db.recursiveDelete(familyDoc.ref);
+    }
+
+    // Se è solo membro di una famiglia altrui, rimuove solo il suo
+    // documento membro — la famiglia e gli altri membri restano intatti.
+    if (userData.familyId) {
+      await db.collection("families").doc(userData.familyId)
+          .collection("members").doc(uid).delete().catch(() => {
+            // Già rimosso o famiglia già eliminata sopra: non bloccante.
+          });
+    }
+
+    // Documento utente e tutte le sue sottocollezioni personali.
+    await db.recursiveDelete(userRef);
+
+    // Account Firebase Auth. "auth/user-not-found" non blocca: i dati
+    // Firestore sono comunque già stati ripuliti sopra.
+    try {
+      await getAuth().deleteUser(uid);
+    } catch (e) {
+      if (e.code !== "auth/user-not-found") throw e;
+    }
+
+    return {
+      uid,
+      deletedOwnedFamilies: ownedFamiliesSnap.docs.map((d) => d.id),
+    };
+  } catch (error) {
+    console.error("ERRORE DELETE USER COMPLETELY:", error);
     if (error instanceof HttpsError) {
       throw error;
     }

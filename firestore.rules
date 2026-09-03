@@ -38,7 +38,7 @@ service cloud.firestore {
         return [
           'isPremium', 'trialEnd', 'scontriniUsati', 'richiesteAiUsate',
           'analisiAvanzateUsate', 'playProductId', 'playPurchaseToken',
-          'playSubscriptionExpiry',
+          'playSubscriptionExpiry', 'subscriptionTier',
         ];
       }
 
