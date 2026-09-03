@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -22,6 +23,14 @@ import 'services/onboarding_service.dart';
 // prima di pubblicare). In produzione (release build) non ha comunque
 // effetto: kDebugMode è sempre false in una build release.
 const bool useEmulators = true;
+
+/// Permette a `main()` (fuori dall'albero widget) di mostrare uno SnackBar
+/// dalla Home o da qualunque altra schermata sia aperta al momento —
+/// FirebaseMessaging.onMessage non era mai ascoltato prima d'ora, quindi
+/// una notifica arrivata ad app aperta non produceva alcun feedback visivo
+/// (restava comunque nello storico "Notifiche", solo senza un avviso
+/// immediato).
+final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -52,6 +61,22 @@ void main() async {
   await AdService.initialize();
   AnalyticsService.logAppOpen();
 
+  // Notifica ricevuta mentre l'app è già aperta: FCM di default non mostra
+  // alcun banner di sistema in questo caso (a differenza di quando l'app è
+  // in background), quindi senza questo listener la notifica sarebbe
+  // visibile solo riaprendo la schermata "Notifiche" in un secondo momento.
+  FirebaseMessaging.onMessage.listen((message) {
+    final title = message.notification?.title;
+    final body = message.notification?.body;
+    if (title == null && body == null) return;
+    scaffoldMessengerKey.currentState?.showSnackBar(
+      SnackBar(
+        content: Text([title, body].whereType<String>().join(' — ')),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  });
+
   runApp(const SmartBudgetApp());
 }
 
@@ -64,6 +89,7 @@ class SmartBudgetApp extends StatelessWidget {
       title: 'SmartBudget',
       theme: AppTheme.light(),
       home: const _RootGate(),
+      scaffoldMessengerKey: scaffoldMessengerKey,
       debugShowCheckedModeBanner: false,
       locale: const Locale('it'),
       supportedLocales: const [Locale('it')],
