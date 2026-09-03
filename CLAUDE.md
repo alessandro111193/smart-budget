@@ -436,6 +436,15 @@ Struttura progetto, config Firebase, autenticazione, buste, obiettivi/challenge 
 **Priorità FASE 2-9 ancora da fare, in ordine proposto**:
 1. ~~Data stimata esaurimento busta + proiezione completamento obiettivo~~ — **fatto**.
 2. ~~Analisi familiare: risparmio + trend multi-mese~~ — **fatto**.
-3. ~~Notifiche push in foreground~~ — **fatto sopra**.
+3. ~~Notifiche push in foreground~~ — **fatto**.
 4. **AI**: classifica esplicita "categorie che incidono di più", insight dedicato ai suggerimenti per obiettivi, individuazione sprechi come categoria a sé (estensioni di `generateAiInsight`) — **comporta vere chiamate Gemini in produzione quando usata: da confermare con l'utente prima di procedere**, come da sua istruzione esplicita su qualunque cosa generi costi reali.
 5. **"Posso permettermelo?"** — la più grande, nuova Cloud Function + UI dedicata + prompt AI apposito — **stesso discorso costi reali del punto 4**, verrà proposta con un piano dettagliato prima di iniziare.
+
+## Stima costo AI per utente Premium + logging token reali (2026-09-03)
+
+Richiesto dall'utente: quanto costa un utente Premium al mese, con e senza il punto 5 ("Posso permettermelo?"). Nessuna stima era mai stata verificata con dati reali finora (il codice non leggeva mai `result.response.usageMetadata`) — solo il target dichiarato "sotto €0,15/utente Premium/mese" in nota da tempo.
+- **Pricing reale confermato** (pagina ufficiale Google, non un aggregatore terzo): Gemini 3.5 Flash-Lite, tariffa standard, $0,30/milione token input, $2,50/milione token output (immagini allo stesso costo per token del testo).
+- **Stima costruita leggendo i prompt reali nel codice** (non misurata): uso leggero ~€0,02/utente/mese, uso pesante (vicino ai limiti oggi validi solo per il Trial) ~€0,07/utente/mese — entrambi ben sotto il target. "Posso permettermelo?" aggiungerebbe stimati €0,002-0,008/mese in più (prompt testuale paragonabile a `suggestIncomeDistribution`, usato solo occasionalmente) — margine ampio anche sommandolo.
+- **Logging dei token reali aggiunto** (a costo zero, nessuna nuova chiamata): nuovo `logTokenUsage(label, result)` in `functions/index.js`, chiamato subito dopo ciascuna delle 8 chiamate `model.generateContent(...)` esistenti (`chatWithAssistant`, `scanReceipt`, `generateAiInsight` nei suoi 4 kind, `suggestIncomeDistribution`, `suggestShoppingList`). Logga `input`/`output`/`totale` token su `console.log` con prefisso `[gemini-tokens]`, consultabile con `firebase functions:log` o dalla Cloud Logging Console filtrando su quella stringa — permetterà di confrontare i prossimi utilizzi reali contro le stime sopra, invece di continuare a ragionare solo su prompt letti a mano.
+- **Verificato senza alcuna chiamata Gemini reale** (nessun costo): `node -c` sintassi valida, il modulo si carica correttamente (16 funzioni esportate, invariate), `logTokenUsage` testato isolatamente con un risultato finto (non una vera risposta Gemini) per confermare il formato del log. `npm run lint` pulito.
+- **Deployato solo sulle 5 function che chiamano davvero Gemini** (`chatWithAssistant`, `scanReceipt`, `generateAiInsight`, `suggestIncomeDistribution`, `suggestShoppingList`, elenco esplicito) — confermato con `functions:list` che `dailyScheduledChecks` resta assente (non riattivata per errore).

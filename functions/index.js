@@ -13,6 +13,28 @@ const db = getFirestore();
 // La chiave viene letta SOLO da functions/.env
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+/**
+ * Registra nei log i token realmente usati da una chiamata Gemini — mai
+ * letti né loggati finora, quindi ogni stima di costo per chiamata era
+ * basata solo sulla lettura dei prompt nel codice, non su dati reali.
+ * Non altera in alcun modo il comportamento della funzione chiamante: un
+ * solo console.log, nessuna chiamata aggiuntiva, nessun costo. Consultabile
+ * con `firebase functions:log` o dalla Cloud Logging Console, filtrando su
+ * "[gemini-tokens]".
+ * @param {string} label Nome della funzione/kind che ha fatto la chiamata
+ *   (es. "chatWithAssistant", "generateAiInsight:daily_tip").
+ * @param {object} result Il valore restituito da model.generateContent().
+ */
+function logTokenUsage(label, result) {
+  const usage = result.response.usageMetadata;
+  if (!usage) return;
+  console.log(
+      `[gemini-tokens] ${label}: input=${usage.promptTokenCount} ` +
+      `output=${usage.candidatesTokenCount} ` +
+      `totale=${usage.totalTokenCount}`,
+  );
+}
+
 // --- HELPER CONDIVISI: ACCESSO PREMIUM/TRIAL E QUOTA "ANALISI AVANZATE" ---
 //
 // Estratti da chatWithAssistant e scanReceipt (che li duplicavano) e usati
@@ -288,6 +310,7 @@ Dati di riepilogo dell'utente: ${summary}
 Domanda: ${question}`;
 
     const result = await model.generateContent(prompt);
+    logTokenUsage("chatWithAssistant", result);
     const answer = result.response.text();
 
     // 5. Aggiorna il contatore SOLO dopo una risposta riuscita
@@ -460,6 +483,7 @@ exports.scanReceipt = onCall({timeoutSeconds: 120}, async (request) => {
     }
 
     const result = await model.generateContent([prompt, ...parts]);
+    logTokenUsage("scanReceipt", result);
     const responseText = result.response.text();
     const parsedData = JSON.parse(responseText);
 
@@ -627,6 +651,7 @@ async function getOrGenerateDailyTip(userId, userRef, userData, isPremium) {
     "oggi, in italiano, massimo due frasi, tono amichevole e " +
     `concreto.\n${summary}`;
   const result = await model.generateContent(prompt);
+  logTokenUsage("generateAiInsight:daily_tip", result);
   const parsed = JSON.parse(result.response.text());
   const text = typeof parsed.text === "string" ? parsed.text : "";
 
@@ -701,6 +726,7 @@ exports.generateAiInsight = onCall({timeoutSeconds: 120}, async (request) => {
         "(un'azione concreta da fare questo mese). Una sola frase per " +
         `campo, tono amichevole, mai giudicante.\n${summary}`;
       const result = await model.generateContent(prompt);
+      logTokenUsage("generateAiInsight:monthly_report", result);
       const parsed = JSON.parse(result.response.text());
 
       const report = {
@@ -756,6 +782,7 @@ exports.generateAiInsight = onCall({timeoutSeconds: 120}, async (request) => {
         "spesa, poi concludi con un consiglio pratico e specifico per " +
         `risparmiare. Tono amichevole, mai giudicante.\n${summary}`;
       const result = await model.generateContent(prompt);
+      logTokenUsage("generateAiInsight:habit_analysis", result);
       const parsed = JSON.parse(result.response.text());
       const text = typeof parsed.text === "string" ? parsed.text : "";
 
@@ -800,6 +827,7 @@ exports.generateAiInsight = onCall({timeoutSeconds: 120}, async (request) => {
         "esprimere MAI giudizi sulle persone o su chi spende di più, " +
         `resta neutro e concreto.\n${summary}`;
       const result = await model.generateContent(prompt);
+      logTokenUsage("generateAiInsight:family_analysis", result);
       const parsed = JSON.parse(result.response.text());
       const text = typeof parsed.text === "string" ? parsed.text : "";
 
@@ -920,6 +948,7 @@ exports.suggestIncomeDistribution = onCall(
           "la logica principale della proposta.";
 
         const result = await model.generateContent(prompt);
+        logTokenUsage("suggestIncomeDistribution", result);
         const parsed = JSON.parse(result.response.text());
 
         // 3. Normalizza lato server: il client userà questi numeri per
@@ -1038,6 +1067,7 @@ exports.suggestShoppingList = onCall(
           `che spieghi la scelta.\n${summary}`;
 
         const result = await model.generateContent(prompt);
+        logTokenUsage("suggestShoppingList", result);
         const parsed = JSON.parse(result.response.text());
 
         // Normalizza lato server: se il modello sfora comunque il budget,
